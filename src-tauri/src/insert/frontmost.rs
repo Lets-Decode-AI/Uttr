@@ -36,8 +36,9 @@ pub fn focused_element() -> Focus {
     imp::focused_element()
 }
 
-/// macOS: whether this app may post synthetic key events. Checking first avoids the system's
-/// "Accessibility Access (Events)" prompt on every paste. Always true elsewhere.
+/// macOS: whether this app may post synthetic key events, using the same Accessibility check as
+/// the permission banner (`CGPreflightPostEventAccess` can say no while Accessibility is on).
+/// Checking first avoids the system's "Accessibility Access (Events)" prompt. True elsewhere.
 pub fn can_post_keys() -> bool {
     imp::can_post_keys()
 }
@@ -98,7 +99,7 @@ mod imp {
             attribute: CFStringRef,
             value: *mut CFTypeRef,
         ) -> i32;
-        fn CGPreflightPostEventAccess() -> bool;
+        fn AXIsProcessTrusted() -> bool;
     }
 
     /// Copies an attribute; the returned object is owned (create rule).
@@ -129,7 +130,7 @@ mod imp {
 
     pub fn can_post_keys() -> bool {
         // SAFETY: no-argument query; does not show a prompt.
-        unsafe { CGPreflightPostEventAccess() }
+        unsafe { AXIsProcessTrusted() }
     }
 }
 
