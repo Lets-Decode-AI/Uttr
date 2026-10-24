@@ -617,6 +617,27 @@ async fn copied_only_emits_toast_and_still_persists() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn no_text_box_tells_the_user_where_the_text_went() {
+    let h = harness(voiced(2.0), true);
+    *h.ins.outcome.lock().unwrap() = InsertOutcome::CopiedOnly(crate::insert::NO_TEXT_FIELD.into());
+    h.send(HotkeyEvent::Pressed);
+    wait_for("started", || h.rec.starts.load(Ordering::SeqCst) == 1).await;
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    wait_for("persisted", || h.saved().len() == 1).await;
+    let toasts: Vec<Value> = h
+        .events
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(n, _)| n == crate::events::TOAST)
+        .map(|(_, v)| v.clone())
+        .collect();
+    assert_eq!(toasts.len(), 1);
+    assert_eq!(toasts[0]["message"], json!(crate::insert::NO_TEXT_FIELD));
+}
+
+#[tokio::test(start_paused = true)]
 async fn paused_ignores_hotkeys() {
     let h = harness(voiced(2.0), true);
     h.handle.set_paused(true);
