@@ -54,7 +54,8 @@
     ],
     "macOS": {
       "infoPlist": "Info.plist",
-      "signingIdentity": "-"
+      "signingIdentity": "-",
+      "entitlements": "Entitlements.plist"
     },
     "publisher": "Lets Decode AI",
     "copyright": "Copyright (c) 2026 Lets Decode AI",
