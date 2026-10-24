@@ -15,10 +15,12 @@ pub enum Focus {
     Unknown,
 }
 
-/// Classifies the accessibility role of the focused element. `None` means nothing has focus.
+/// Classifies the accessibility role of the focused element. `None` means macOS reported no
+/// focused element, which Electron apps (Claude, Slack, VS Code) do even while a text box has
+/// focus, so only a known non-text role stops the paste.
 pub fn classify_role(role: Option<&str>) -> Focus {
     match role {
-        None => Focus::NotEditable,
+        None => Focus::Unknown,
         Some("AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField") => Focus::Editable,
         Some(
             "AXButton" | "AXList" | "AXOutline" | "AXTable" | "AXRow" | "AXCell" | "AXImage"
@@ -99,9 +101,6 @@ mod imp {
         fn CGPreflightPostEventAccess() -> bool;
     }
 
-    /// kAXErrorNoValue: the attribute exists but has no value (nothing is focused).
-    const AX_ERROR_NO_VALUE: i32 = -25212;
-
     /// Copies an attribute; the returned object is owned (create rule).
     fn copy_attr(element: CFTypeRef, name: &str) -> Result<CFType, i32> {
         let name = CFString::new(name);
@@ -120,19 +119,12 @@ mod imp {
     pub fn focused_element() -> super::Focus {
         // SAFETY: returns a +1 system-wide element we wrap and release.
         let system = unsafe { CFType::wrap_under_create_rule(AXUIElementCreateSystemWide()) };
-        let focused = match copy_attr(system.as_CFTypeRef(), "AXFocusedUIElement") {
-            Ok(f) => f,
-            Err(AX_ERROR_NO_VALUE) => return super::classify_role(None),
-            Err(_) => return super::Focus::Unknown,
-        };
-        let role = copy_attr(focused.as_CFTypeRef(), "AXRole")
+        let role = copy_attr(system.as_CFTypeRef(), "AXFocusedUIElement")
             .ok()
+            .and_then(|f| copy_attr(f.as_CFTypeRef(), "AXRole").ok())
             .and_then(|r| r.downcast::<CFString>())
             .map(|r| r.to_string());
-        match role {
-            Some(r) => super::classify_role(Some(&r)),
-            None => super::Focus::Unknown,
-        }
+        super::classify_role(role.as_deref())
     }
 
     pub fn can_post_keys() -> bool {
@@ -220,8 +212,13 @@ mod tests {
     }
 
     #[test]
-    fn nothing_focused_or_non_text_roles_are_not_editable() {
-        assert_eq!(classify_role(None), Focus::NotEditable);
+    fn unreported_focus_still_pastes() {
+        // Electron apps such as Claude report no focused element while a text box has focus.
+        assert_eq!(classify_role(None), Focus::Unknown);
+    }
+
+    #[test]
+    fn non_text_roles_are_not_editable() {
         for r in ["AXButton", "AXList", "AXTable", "AXScrollArea", "AXImage"] {
             assert_eq!(classify_role(Some(r)), Focus::NotEditable, "{r}");
         }
