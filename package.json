@@ -1,7 +1,7 @@
 {
   "name": "uttr",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local, private push-to-talk dictation powered by sherpa-onnx speech models",
   "license": "MIT",
   "author": "Lets Decode AI contributors",

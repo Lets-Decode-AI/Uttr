@@ -1,3 +1,4 @@
+import PermissionBanner from './components/PermissionBanner';
 import Sidebar from './components/Sidebar';
 import { ToastProvider } from './components/Toasts';
 import { useHash } from './lib/hooks';
@@ -21,6 +22,7 @@ export default function App() {
           <main className="content">
             <div className="content-drag" data-tauri-drag-region />
             <div className="content-body">
+              <PermissionBanner />
               {route === '/models' ? <Models /> : route === '/settings' ? <Settings /> : <History />}
             </div>
           </main>

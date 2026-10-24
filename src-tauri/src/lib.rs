@@ -98,6 +98,92 @@ fn set_dock_presence(app: &AppHandle, visible: bool) {
     let _ = (app, visible);
 }
 
+#[cfg(target_os = "macos")]
+mod flowbar_macos {
+    use objc2_app_kit::{NSStatusWindowLevel, NSWindow, NSWindowCollectionBehavior as B};
+
+    /// Spaces and full-screen apps each have their own Space. `visibleOnAllWorkspaces` covers
+    /// ordinary Spaces only; the Flow Bar also needs `FullScreenAuxiliary` to appear over
+    /// full-screen apps, and a status-bar level to stay above their windows.
+    pub fn behavior(current: B) -> B {
+        current | B::CanJoinAllSpaces | B::FullScreenAuxiliary | B::Stationary | B::IgnoresCycle
+    }
+
+    /// Must run on the main thread.
+    pub fn float_over_everything(w: &tauri::WebviewWindow) {
+        let Ok(ptr) = w.ns_window() else {
+            tracing::warn!("could not reach the Flow Bar's native window");
+            return;
+        };
+        // SAFETY: Tauri returns the window's live NSWindow; we are on the main thread (setup).
+        let win: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+        win.setCollectionBehavior(behavior(win.collectionBehavior()));
+        win.setLevel(NSStatusWindowLevel);
+        win.orderFrontRegardless();
+    }
+
+    /// Must run on the main thread.
+    pub fn order_front(w: &tauri::WebviewWindow) {
+        if let Ok(ptr) = w.ns_window() {
+            // SAFETY: live NSWindow from Tauri; callers run on the main thread.
+            let win: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+            win.orderFrontRegardless();
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn flowbar_joins_full_screen_spaces() {
+            let b = behavior(B::Default);
+            assert!(b.contains(B::FullScreenAuxiliary));
+            assert!(b.contains(B::CanJoinAllSpaces));
+            assert!(b.contains(B::Stationary));
+        }
+    }
+}
+
+/// Passed by the launch-at-login agent so a login launch stays in the menu bar.
+const LOGIN_ARG: &str = "--at-login";
+
+#[derive(Debug, PartialEq)]
+enum StartupWindow {
+    Onboarding,
+    Main,
+    None,
+}
+
+/// Opening the app from Applications shows its window. A launch at login stays in the menu
+/// bar unless a permission is missing, so the user sees why the shortcut does nothing.
+fn startup_window(onboarded: bool, at_login: bool, permissions_ok: bool) -> StartupWindow {
+    if !onboarded {
+        StartupWindow::Onboarding
+    } else if at_login && permissions_ok {
+        StartupWindow::None
+    } else {
+        StartupWindow::Main
+    }
+}
+
+/// Puts the Flow Bar in front on the current Space, including full-screen apps. Call on the
+/// main thread.
+fn bring_flowbar_front(app: &AppHandle) {
+    let Some(w) = app.get_webview_window("flowbar") else {
+        return;
+    };
+    let enabled = app
+        .try_state::<app_state::AppState>()
+        .is_none_or(|s| s.settings.lock().map(|s| s.show_flowbar).unwrap_or(true));
+    if !enabled {
+        return;
+    }
+    let _ = w.show();
+    #[cfg(target_os = "macos")]
+    flowbar_macos::order_front(&w);
+}
+
 /// Place the Flow Bar at the bottom-center of the monitor under the cursor (falling back to the
 /// primary monitor), inside the monitor's work area when the OS reports one.
 fn position_flowbar(app: &AppHandle) -> tauri::Result<()> {
@@ -193,6 +279,8 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
             if name == events::STATE {
                 if value.get("kind").and_then(Value::as_str) == Some("recording") {
                     let _ = position_flowbar(&h);
+                    let app = h.clone();
+                    let _ = h.run_on_main_thread(move || bring_flowbar_front(&app));
                 }
                 *cache.lock().unwrap_or_else(|p| p.into_inner()) = value.clone();
             }
@@ -326,8 +414,18 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     if !show_flowbar {
         commands::set_flowbar_visible(&handle, false);
     }
-    if !onboarded {
-        open_main_window(&handle, Some("/onboarding"))?;
+    let at_login = std::env::args().any(|a| a == LOGIN_ARG);
+    let p = permissions::status();
+    let permissions_ok = [p.microphone, p.accessibility].iter().all(|s| {
+        matches!(
+            s,
+            permissions::Perm::Granted | permissions::Perm::NotRequired
+        )
+    });
+    match startup_window(onboarded, at_login, permissions_ok) {
+        StartupWindow::Onboarding => open_main_window(&handle, Some("/onboarding"))?,
+        StartupWindow::Main => open_main_window(&handle, None)?,
+        StartupWindow::None => {}
     }
     Ok(())
 }
@@ -349,7 +447,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
-            None,
+            Some(vec![LOGIN_ARG]),
         ))
         .invoke_handler(tauri::generate_handler![
             commands::get_state,
@@ -388,25 +486,55 @@ pub fn run() {
             if let Some(w) = app.get_webview_window("flowbar") {
                 // Click-through: the pill never steals clicks or focus.
                 w.set_ignore_cursor_events(true)?;
+                #[cfg(target_os = "macos")]
+                flowbar_macos::float_over_everything(&w);
             }
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, event| {
+        .run(|app, event| match event {
             // Keep running in the tray when all windows are closed.
-            if let tauri::RunEvent::ExitRequested { api, code, .. } = event
-                && code.is_none()
-            {
+            tauri::RunEvent::ExitRequested { api, code, .. } if code.is_none() => {
                 api.prevent_exit();
             }
+            // Opening the app again (Finder, Launchpad, Dock) while it runs shows its window.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { .. } => {
+                if let Err(e) = open_main_window(app, None) {
+                    tracing::warn!("could not open the main window: {e}");
+                }
+            }
+            _ => {}
         });
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{StartupWindow, startup_window};
+
     #[test]
     fn smoke() {
         assert_eq!(2 + 2, 4);
+    }
+
+    #[test]
+    fn opening_from_applications_shows_the_window() {
+        assert_eq!(startup_window(true, false, true), StartupWindow::Main);
+    }
+
+    #[test]
+    fn login_launch_stays_in_the_menu_bar() {
+        assert_eq!(startup_window(true, true, true), StartupWindow::None);
+    }
+
+    #[test]
+    fn login_launch_with_missing_permission_shows_the_window() {
+        assert_eq!(startup_window(true, true, false), StartupWindow::Main);
+    }
+
+    #[test]
+    fn first_launch_shows_onboarding() {
+        assert_eq!(startup_window(false, true, true), StartupWindow::Onboarding);
     }
 }
