@@ -493,7 +493,7 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| match event {
+        .run(|_app, event| match event {
             // Keep running in the tray when all windows are closed.
             tauri::RunEvent::ExitRequested { api, code, .. } if code.is_none() => {
                 api.prevent_exit();
@@ -501,7 +501,7 @@ pub fn run() {
             // Opening the app again (Finder, Launchpad, Dock) while it runs shows its window.
             #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => {
-                if let Err(e) = open_main_window(app, None) {
+                if let Err(e) = open_main_window(_app, None) {
                     tracing::warn!("could not open the main window: {e}");
                 }
             }
