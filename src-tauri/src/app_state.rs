@@ -9,12 +9,17 @@ use serde_json::Value;
 
 use crate::audio::{Recorder, RecorderError, RecordingStats};
 use crate::dictation::{ControllerHandle, RecorderPort};
-use crate::hotkey::{Binding, HotkeyService, default_binding};
+use crate::hotkey::{Binding, HotkeyService, default_binding, default_command_binding};
+use crate::llm::AiProvider;
 use crate::models::Manager;
 use crate::models::catalog::CatalogEntry;
 use crate::models::hardware::{Hardware, recommend};
 use crate::store::Store;
 use crate::stt::SttHandle;
+use crate::style::{AppStyle, Style};
+
+pub const DEFAULT_OPENAI_MODEL: &str = "gpt-5-mini";
+pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-opus-5-5";
 
 /// Key of the single JSON settings document in the store's settings table.
 pub const SETTINGS_KEY: &str = "settings";
@@ -31,6 +36,16 @@ pub struct Settings {
     pub preload: bool,
     pub launch_at_login: bool,
     pub onboarded: bool,
+    /// Hold to speak an instruction for the AI (Command Mode).
+    pub command_hotkey: Binding,
+    pub ai_provider: AiProvider,
+    pub openai_model: String,
+    /// OpenAI or any compatible server (Ollama, LM Studio), including `/v1`.
+    pub openai_base_url: String,
+    pub anthropic_model: String,
+    /// Style for apps without their own rule.
+    pub default_style: Style,
+    pub app_styles: Vec<AppStyle>,
 }
 
 impl Default for Settings {
@@ -43,6 +58,13 @@ impl Default for Settings {
             preload: false,
             launch_at_login: false,
             onboarded: false,
+            command_hotkey: default_command_binding(),
+            ai_provider: AiProvider::Off,
+            openai_model: DEFAULT_OPENAI_MODEL.into(),
+            openai_base_url: crate::llm::cloud::OPENAI_URL.into(),
+            anthropic_model: DEFAULT_ANTHROPIC_MODEL.into(),
+            default_style: Style::Formal,
+            app_styles: Vec::new(),
         }
     }
 }
@@ -189,6 +211,31 @@ pub fn validate_settings(s: &Settings) -> Result<(), String> {
     if s.hotkey.keys.contains(&crate::hotkey::Key::Escape) {
         return Err("Esc cannot be part of the shortcut because it cancels dictation.".into());
     }
+    if s.command_hotkey.keys.is_empty() {
+        return Err("Choose at least one key for the Command Mode shortcut.".into());
+    }
+    if s.command_hotkey.keys.contains(&crate::hotkey::Key::Escape) {
+        return Err("Esc cannot be part of the Command Mode shortcut.".into());
+    }
+    let same = |a: &Binding, b: &Binding| {
+        a.keys.len() == b.keys.len() && a.keys.iter().all(|k| b.keys.contains(k))
+    };
+    if same(&s.hotkey, &s.command_hotkey) {
+        return Err("Command Mode needs a different shortcut from dictation.".into());
+    }
+    if s.ai_provider == AiProvider::OpenAi
+        && !(s.openai_base_url.starts_with("https://") || s.openai_base_url.starts_with("http://"))
+    {
+        return Err("The OpenAI server address must start with https:// or http://.".into());
+    }
+    for (name, model) in [
+        ("OpenAI", &s.openai_model),
+        ("Anthropic", &s.anthropic_model),
+    ] {
+        if model.trim().is_empty() {
+            return Err(format!("Enter a model name for {name}."));
+        }
+    }
     Ok(())
 }
 
@@ -250,6 +297,11 @@ pub struct AppState {
     pub dictation_state: Arc<Mutex<Value>>,
     pub paused: AtomicBool,
     pub pause_item: Mutex<Option<tauri::menu::MenuItem<tauri::Wry>>>,
+    /// On-device AI (GGUF) models.
+    pub llm_models: Manager,
+    pub local_llm: crate::llm::LocalLlm,
+    pub ai_keys: crate::llm::Keys,
+    pub ai: Arc<crate::llm::Ai>,
 }
 
 #[cfg(test)]
@@ -372,6 +424,39 @@ mod settings_apply_tests {
         };
         assert!(commit_settings(&store, &cur, &auto, new).is_err());
         assert_eq!(*cur.lock().unwrap(), Settings::default());
+    }
+
+    #[test]
+    fn command_shortcut_must_differ_from_dictation() {
+        let (store, cur, auto) = fixture(false);
+        let d = Settings::default();
+        let new = Settings {
+            command_hotkey: Binding {
+                keys: d.hotkey.keys.iter().rev().copied().collect(),
+            },
+            ..d
+        };
+        let e = commit_settings(&store, &cur, &auto, new).unwrap_err();
+        assert!(e.contains("different shortcut"), "{e}");
+    }
+
+    #[test]
+    fn blank_model_name_is_rejected() {
+        let (store, cur, auto) = fixture(false);
+        let new = Settings {
+            anthropic_model: "  ".into(),
+            ..Settings::default()
+        };
+        assert!(commit_settings(&store, &cur, &auto, new).is_err());
+    }
+
+    #[test]
+    fn older_settings_get_part_two_defaults() {
+        let s: Settings = serde_json::from_str(r#"{"onboarded":true,"mic":"USB"}"#).unwrap();
+        assert_eq!(s.ai_provider, AiProvider::Off);
+        assert_eq!(s.command_hotkey, default_command_binding());
+        assert_eq!(s.default_style, Style::Formal);
+        assert!(validate_settings(&s).is_ok());
     }
 
     #[test]

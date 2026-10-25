@@ -7,6 +7,8 @@ pub enum EngineKind {
     Whisper,
     Moonshine,
     SenseVoice,
+    /// A GGUF text model for AI cleanup and Command Mode (llama.cpp), not a speech model.
+    Llm,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -39,6 +41,12 @@ impl Catalog {
     pub fn bundled() -> Catalog {
         serde_json::from_str(include_str!("../../resources/catalog.json"))
             .expect("bundled catalog.json is valid")
+    }
+
+    /// The on-device AI (GGUF) models compiled into the binary.
+    pub fn llm_bundled() -> Catalog {
+        serde_json::from_str(include_str!("../../resources/llm_catalog.json"))
+            .expect("bundled llm_catalog.json is valid")
     }
 
     pub fn get(&self, id: &str) -> Option<&CatalogEntry> {
@@ -79,6 +87,23 @@ mod tests {
                 assert_eq!(f.sha256.len(), 64, "{}", f.path);
                 assert!(f.sha256.chars().all(|ch| ch.is_ascii_hexdigit()));
             }
+        }
+    }
+
+    #[test]
+    fn llm_catalog_lists_gguf_models() {
+        let c = Catalog::llm_bundled();
+        assert!(c.get(super::super::DEFAULT_LLM).is_some());
+        for e in c.entries() {
+            assert_eq!(e.engine, EngineKind::Llm);
+            assert_eq!(e.files.len(), 1);
+            assert!(e.files[0].path.ends_with(".gguf"));
+            assert_eq!(e.files[0].sha256.len(), 64);
+            assert_eq!(e.revision.len(), 40);
+            assert!(
+                Catalog::bundled().get(&e.id).is_none(),
+                "ids must not clash"
+            );
         }
     }
 }

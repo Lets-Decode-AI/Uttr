@@ -14,7 +14,7 @@ export type PermKind = 'microphone' | 'accessibility' | 'keyboard';
 
 export type DictationState =
   | { kind: 'idle' }
-  | { kind: 'recording'; handsFree: boolean }
+  | { kind: 'recording'; handsFree: boolean; command?: boolean }
   | { kind: 'transcribing' }
   | { kind: 'inserting' }
   | { kind: 'error'; message: string };
@@ -24,6 +24,13 @@ export type Key =
   | 'AltLeft' | 'AltRight' | 'ShiftLeft' | 'ShiftRight' | 'Space' | 'Escape';
 export interface Binding {
   keys: Key[];
+}
+
+export type AiProvider = 'off' | 'local' | 'openAi' | 'anthropic';
+export type Style = 'formal' | 'casual' | 'veryCasual';
+export interface AppStyle {
+  app: string;
+  style: Style;
 }
 
 export interface Settings {
@@ -36,9 +43,18 @@ export interface Settings {
   preload: boolean;
   launchAtLogin: boolean;
   onboarded: boolean;
+  /** Hold to speak an instruction for the AI (Command Mode). */
+  commandHotkey: Binding;
+  aiProvider: AiProvider;
+  openaiModel: string;
+  /** OpenAI or a compatible server (Ollama, LM Studio), including `/v1`. */
+  openaiBaseUrl: string;
+  anthropicModel: string;
+  defaultStyle: Style;
+  appStyles: AppStyle[];
 }
 
-export type EngineKind = 'transducer' | 'whisper' | 'moonshine' | 'sensevoice';
+export type EngineKind = 'transducer' | 'whisper' | 'moonshine' | 'sensevoice' | 'llm';
 export interface ModelFile {
   path: string;
   size: number;
@@ -108,6 +124,16 @@ export interface DictEntry {
   term: string;
   replacement: string | null;
 }
+export interface Snippet {
+  id: number;
+  trigger: string;
+  expansion: string;
+}
+/** Which API keys are stored in the keychain. */
+export interface AiKeysStatus {
+  openAi: boolean;
+  anthropic: boolean;
+}
 export interface Toast {
   level: 'info' | 'warning' | 'error' | string;
   message: string;
@@ -149,6 +175,20 @@ export const api = {
   dictionaryList: () => invoke<DictEntry[]>('dictionary_list'),
   dictionaryAdd: (term: string, replacement?: string) => invoke<number>('dictionary_add', { term, replacement }),
   dictionaryDelete: (id: number) => invoke<void>('dictionary_delete', { id }),
+
+  snippetList: () => invoke<Snippet[]>('snippet_list'),
+  snippetAdd: (trigger: string, expansion: string) => invoke<number>('snippet_add', { trigger, expansion }),
+  snippetUpdate: (id: number, trigger: string, expansion: string) => invoke<void>('snippet_update', { id, trigger, expansion }),
+  snippetDelete: (id: number) => invoke<void>('snippet_delete', { id }),
+  recentApps: () => invoke<string[]>('recent_apps'),
+
+  /** On-device AI models; install, pause, delete and activate them with the model commands. */
+  llmCatalog: () => invoke<CatalogEntry[]>('llm_catalog'),
+  llmInstalled: () => invoke<InstalledModelDto[]>('llm_installed'),
+  aiKeysStatus: () => invoke<AiKeysStatus>('ai_keys_status'),
+  aiKeySet: (provider: 'openAi' | 'anthropic', key: string | null) => invoke<void>('ai_key_set', { provider, key }),
+  /** Runs text through the current AI settings: cleanup, or a Command Mode instruction. */
+  aiTry: (text: string, command: boolean) => invoke<string>('ai_try', { text, command }),
 
   micList: () => invoke<string[]>('mic_list'),
   openLogFolder: () => invoke<void>('open_log_folder'),

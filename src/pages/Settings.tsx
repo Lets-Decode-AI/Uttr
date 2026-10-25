@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { api, type DictEntry, type Settings as S } from '../ipc';
+import { useEffect, useState } from 'react';
+import { api, type DictEntry } from '../ipc';
 import HotkeyInput from '../components/HotkeyInput';
 import MicPicker from '../components/MicPicker';
 import { useToast } from '../components/Toasts';
@@ -13,45 +13,14 @@ import Switch from '../components/ui/Switch';
 import { errMsg } from '../lib/format';
 import { isWindows } from '../lib/platform';
 import { useTheme, type ThemePref } from '../lib/theme';
+import { useSettings } from '../lib/useSettings';
 
 const THEMES: { value: ThemePref; label: string }[] = [{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }];
 const IDLE: [string, number | null][] = [['After 5 minutes', 5], ['After 10 minutes', 10], ['After 30 minutes', 30], ['Never', null]];
 
 export default function Settings() {
-  const toast = useToast();
-  const [s, setS] = useState<S | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { s, error, save } = useSettings();
   const [changing, setChanging] = useState(false);
-
-  const confirmed = useRef<S | null>(null); // last state the backend accepted
-  const queue = useRef<Promise<void>>(Promise.resolve());
-  const pending = useRef(0);
-
-  useEffect(() => {
-    api.settingsGet().then((v) => { confirmed.current = v; setS(v); }, (e) => setError(errMsg(e)));
-  }, []);
-
-  // Saves run one at a time, each applied on top of the last accepted state, so a rejected
-  // save can never wipe a later one.
-  const save = (patch: Partial<S>) => {
-    setS((x) => (x ? { ...x, ...patch } : x));
-    setError(null);
-    pending.current++;
-    queue.current = queue.current.then(async () => {
-      try {
-        const base = confirmed.current;
-        if (!base) return;
-        const next = { ...base, ...patch };
-        await api.settingsSet(next);
-        confirmed.current = next;
-      } catch (e) {
-        setError(errMsg(e)); // the backend rejected it, for example an invalid shortcut
-        toast(errMsg(e), 'error');
-      } finally {
-        if (--pending.current === 0) setS(confirmed.current);
-      }
-    });
-  };
 
   if (!s) return <div className="page">{error && <div className="banner-error" role="alert">{error}</div>}</div>;
 
@@ -62,7 +31,7 @@ export default function Settings() {
       </header>
       {error && <div className="banner-error" role="alert">{error}</div>}
 
-      <Group title="Dictation" footer="Hold the shortcut to talk, or double-press it to keep listening hands-free.">
+      <Group title="Dictation" footer="Hold the shortcut to talk, or double-press it to keep listening hands-free. The Command Mode shortcut is on the AI page.">
         <Row
           label="Shortcut"
           accessory={

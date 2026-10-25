@@ -26,6 +26,8 @@ pub enum HotkeyEvent {
     Released,
     DoubleTap,
     Cancel,
+    /// The Command Mode chord is held: the recording in progress is an instruction for the AI.
+    Command,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -69,6 +71,17 @@ pub fn default_binding() -> Binding {
     let keys = vec![Key::Fn];
     #[cfg(not(target_os = "macos"))]
     let keys = vec![Key::ControlLeft, Key::MetaLeft];
+    Binding { keys }
+}
+
+/// Hold `Fn+Ctrl` on macOS, `Ctrl+Super+Alt` elsewhere: the dictation chord plus one key, so
+/// adding that key while dictating switches the recording to Command Mode.
+pub fn default_command_binding() -> Binding {
+    let mut keys = default_binding().keys;
+    #[cfg(target_os = "macos")]
+    keys.push(Key::ControlLeft);
+    #[cfg(not(target_os = "macos"))]
+    keys.push(Key::AltLeft);
     Binding { keys }
 }
 
@@ -131,6 +144,9 @@ pub fn retry_hotkey_start(
 /// State shared between the service handle and the backend thread.
 pub struct Core {
     chord: ChordTracker,
+    /// Command Mode chord. Either chord counts as "held" for the gesture; completing this one
+    /// also reports `Command`.
+    command: Option<ChordTracker>,
     gesture: GestureDetector,
     pub armed: bool,
     esc_down: bool,
@@ -142,6 +158,7 @@ impl Core {
     pub fn new(binding: Binding, tx: Sender<HotkeyEvent>) -> Self {
         Self {
             chord: ChordTracker::new(binding),
+            command: None,
             gesture: GestureDetector::new(),
             armed: false,
             esc_down: false,
@@ -173,24 +190,45 @@ impl Core {
             }
             return;
         }
-        if let Some(chord_down) = self.chord.on_key(key, down) {
-            if chord_down && !self.chord_keys_really_down(key) {
-                return;
-            }
-            let events = self.gesture.on_key(chord_down, Instant::now());
+        let was_held = self.held();
+        let dictation = self.chord.on_key(key, down);
+        let command = self.command.as_mut().and_then(|c| c.on_key(key, down));
+        if dictation == Some(true) && !Self::keys_really_down(&mut self.chord, &self.verifier, key)
+        {
+            return;
+        }
+        if command == Some(true)
+            && let Some(c) = self.command.as_mut()
+            && !Self::keys_really_down(c, &self.verifier, key)
+        {
+            return;
+        }
+        let held = self.held();
+        if held != was_held {
+            let events = self.gesture.on_key(held, Instant::now());
             self.emit(events);
+        }
+        if command == Some(true) {
+            self.emit([HotkeyEvent::Command]);
         }
     }
 
-    /// The chord just completed with `latest`. The other keys must be physically down: any the
+    fn held(&self) -> bool {
+        self.chord.active || self.command.as_ref().is_some_and(|c| c.active)
+    }
+
+    /// `chord` just completed with `latest`. The other keys must be physically down: any the
     /// OS says are up are stale (their release was missed) and are forgotten, and the chord is
     /// not reported. `latest` itself is skipped: a low-level hook runs before the OS updates it.
-    fn chord_keys_really_down(&mut self, latest: Key) -> bool {
-        let Some(verify) = self.verifier.as_ref() else {
+    fn keys_really_down(
+        chord: &mut ChordTracker,
+        verifier: &Option<KeyVerifier>,
+        latest: Key,
+    ) -> bool {
+        let Some(verify) = verifier.as_ref() else {
             return true;
         };
-        let stale: Vec<Key> = self
-            .chord
+        let stale: Vec<Key> = chord
             .binding
             .keys
             .iter()
@@ -198,20 +236,26 @@ impl Core {
             .filter(|k| *k != latest && !verify(*k))
             .collect();
         for k in &stale {
-            self.chord.down.remove(k);
+            chord.down.remove(k);
         }
         if !stale.is_empty() {
             tracing::debug!("ignoring stale held keys: {stale:?}");
-            self.chord.active = false;
+            chord.active = false;
         }
         stale.is_empty()
     }
 
     /// Forget all held keys, releasing the chord if it was held.
     pub fn reset(&mut self) {
+        let was_held = self.held();
         self.chord.down.clear();
+        self.chord.active = false;
+        if let Some(c) = self.command.as_mut() {
+            c.down.clear();
+            c.active = false;
+        }
         self.esc_down = false;
-        if std::mem::take(&mut self.chord.active) {
+        if was_held {
             let events = self.gesture.on_key(false, Instant::now());
             self.emit(events);
         }
@@ -220,6 +264,12 @@ impl Core {
     pub fn set_binding(&mut self, binding: Binding) {
         self.reset();
         self.chord = ChordTracker::new(binding);
+    }
+
+    /// `None` turns Command Mode's shortcut off.
+    pub fn set_command_binding(&mut self, binding: Option<Binding>) {
+        self.reset();
+        self.command = binding.map(ChordTracker::new);
     }
 }
 
@@ -265,6 +315,10 @@ impl HotkeyService {
 
     pub fn set_binding(&self, binding: Binding) {
         lock(&self.core).set_binding(binding);
+    }
+
+    pub fn set_command_binding(&self, binding: Option<Binding>) {
+        lock(&self.core).set_command_binding(binding);
     }
 
     /// Esc emits `Cancel` only while armed (set by the dictation controller
@@ -441,6 +495,90 @@ mod tests {
         core.handle(Key::ControlLeft, true);
         core.handle(Key::MetaLeft, true);
         assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Pressed);
+    }
+
+    fn fn_ctrl_core() -> (Core, std::sync::mpsc::Receiver<HotkeyEvent>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut core = Core::new(
+            Binding {
+                keys: vec![Key::Fn],
+            },
+            tx,
+        );
+        core.set_command_binding(Some(Binding {
+            keys: vec![Key::Fn, Key::ControlLeft],
+        }));
+        (core, rx)
+    }
+
+    #[test]
+    fn adding_the_command_key_while_dictating_switches_to_command_mode() {
+        let (mut core, rx) = fn_ctrl_core();
+        core.handle(Key::Fn, true);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Pressed);
+        core.handle(Key::ControlLeft, true);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Command);
+        // Letting go of Ctrl first keeps the recording going until Fn is released.
+        core.handle(Key::ControlLeft, false);
+        assert!(rx.try_recv().is_err());
+        core.handle(Key::Fn, false);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Released);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn command_chord_pressed_together_reports_press_then_command() {
+        let (mut core, rx) = fn_ctrl_core();
+        core.handle(Key::ControlLeft, true);
+        assert!(rx.try_recv().is_err(), "Ctrl alone does nothing");
+        core.handle(Key::Fn, true);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Pressed);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Command);
+        core.handle(Key::Fn, false);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Released);
+    }
+
+    #[test]
+    fn separate_command_chord_starts_its_own_recording() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut core = Core::new(
+            Binding {
+                keys: vec![Key::Fn],
+            },
+            tx,
+        );
+        core.set_command_binding(Some(Binding {
+            keys: vec![Key::AltRight],
+        }));
+        core.handle(Key::AltRight, true);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Pressed);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Command);
+        core.handle(Key::AltRight, false);
+        assert_eq!(rx.try_recv().unwrap(), HotkeyEvent::Released);
+    }
+
+    #[test]
+    fn without_a_command_binding_extra_keys_change_nothing() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut core = Core::new(
+            Binding {
+                keys: vec![Key::Fn],
+            },
+            tx,
+        );
+        core.handle(Key::Fn, true);
+        core.handle(Key::ControlLeft, true);
+        core.handle(Key::Fn, false);
+        let got: Vec<_> = rx.try_iter().collect();
+        assert_eq!(got, vec![HotkeyEvent::Pressed, HotkeyEvent::Released]);
+    }
+
+    #[test]
+    fn default_command_binding_extends_the_dictation_chord() {
+        let d = default_binding().keys;
+        let c = default_command_binding().keys;
+        assert_eq!(c.len(), d.len() + 1);
+        assert!(d.iter().all(|k| c.contains(k)));
     }
 
     #[test]

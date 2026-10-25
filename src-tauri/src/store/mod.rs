@@ -43,6 +43,13 @@ pub struct DictEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Snippet {
+    pub id: i64,
+    pub trigger: String,
+    pub expansion: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DownloadRow {
     pub file: String,
     pub bytes_done: i64,
@@ -209,6 +216,53 @@ impl Store {
         Ok(())
     }
 
+    pub fn snippet_list(&self) -> Result<Vec<Snippet>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare("SELECT id, trigger, expansion FROM snippets ORDER BY id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Snippet {
+                id: r.get(0)?,
+                trigger: r.get(1)?,
+                expansion: r.get(2)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    pub fn snippet_add(&self, trigger: &str, expansion: &str) -> Result<i64> {
+        let conn = self.lock()?;
+        conn.execute(
+            "INSERT INTO snippets(trigger, expansion) VALUES (?1, ?2)",
+            params![trigger, expansion],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn snippet_update(&self, id: i64, trigger: &str, expansion: &str) -> Result<()> {
+        self.lock()?.execute(
+            "UPDATE snippets SET trigger = ?2, expansion = ?3 WHERE id = ?1",
+            params![id, trigger, expansion],
+        )?;
+        Ok(())
+    }
+
+    pub fn snippet_delete(&self, id: i64) -> Result<()> {
+        self.lock()?
+            .execute("DELETE FROM snippets WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Apps dictated into, most recent first (for suggesting per-app styles).
+    pub fn recent_apps(&self, limit: u32) -> Result<Vec<String>> {
+        let conn = self.lock()?;
+        let mut stmt = conn.prepare(
+            "SELECT app_name FROM transcripts WHERE app_name IS NOT NULL AND app_name != ''
+             GROUP BY app_name ORDER BY MAX(created_at) DESC LIMIT ?1",
+        )?;
+        let rows = stmt.query_map([i64::from(limit)], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn download_upsert(
         &self,
         model_id: &str,
@@ -285,7 +339,59 @@ mod tests {
     #[test]
     fn migrates_fresh_db() {
         let s = Store::open_in_memory().unwrap();
-        assert_eq!(s.schema_version().unwrap(), 1);
+        assert_eq!(s.schema_version().unwrap(), 2);
+    }
+
+    #[test]
+    fn recent_apps_are_distinct_and_newest_first() {
+        let s = Store::open_in_memory().unwrap();
+        for (ts, app) in [
+            (1, Some("Mail")),
+            (2, Some("Slack")),
+            (3, Some("Mail")),
+            (4, None),
+        ] {
+            let mut t = nt(ts, "x");
+            t.app_name = app.map(String::from);
+            s.insert_transcript(t).unwrap();
+        }
+        assert_eq!(s.recent_apps(10).unwrap(), ["Mail", "Slack"]);
+    }
+
+    #[test]
+    fn snippet_crud() {
+        let s = Store::open_in_memory().unwrap();
+        let a = s.snippet_add("my email", "a@x.io").unwrap();
+        s.snippet_add("sig", "Best,\nSam").unwrap();
+        s.snippet_update(a, "my mail", "b@x.io").unwrap();
+        let l = s.snippet_list().unwrap();
+        assert_eq!(l.len(), 2);
+        assert_eq!(
+            (l[0].trigger.as_str(), l[0].expansion.as_str()),
+            ("my mail", "b@x.io")
+        );
+        s.snippet_delete(a).unwrap();
+        assert_eq!(s.snippet_list().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn version_1_database_gains_the_snippets_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("flow.db");
+        {
+            let conn = Connection::open(&p).unwrap();
+            conn.execute_batch(migrations::MIGRATIONS[0]).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE schema_version(version INTEGER NOT NULL);
+                 INSERT INTO schema_version(version) VALUES (1);
+                 INSERT INTO dictionary(term) VALUES ('kept');",
+            )
+            .unwrap();
+        }
+        let s = Store::open(&p).unwrap();
+        assert_eq!(s.schema_version().unwrap(), 2);
+        assert_eq!(s.dictionary_list().unwrap()[0].term, "kept");
+        s.snippet_add("t", "e").unwrap();
     }
 
     #[test]
@@ -347,7 +453,7 @@ mod tests {
         s.set_setting("k", &1).unwrap();
         drop(s);
         let s = Store::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 1);
+        assert_eq!(s.schema_version().unwrap(), 2);
         assert_eq!(s.get_setting::<i32>("k").unwrap(), Some(1));
     }
 }

@@ -44,7 +44,17 @@ pub trait Inserter: Send + Sync {
     /// Blocking: sleeps the restore delay on the calling thread.
     fn insert(&self, text: &str) -> InsertOutcome;
     fn context(&self) -> InsertContext;
+    /// The text selected in the frontmost app, read with a synthetic copy; the clipboard is
+    /// restored afterwards. `None` when nothing is selected or it cannot be read. Blocking.
+    fn selected_text(&self) -> Option<String> {
+        None
+    }
 }
+
+/// Placed on the clipboard before the synthetic copy; still there afterwards = no selection.
+const COPY_SENTINEL: &str = "\u{2063}uttr-no-selection\u{2063}";
+/// How long to wait for the frontmost app to answer the synthetic copy.
+pub const COPY_WAIT: Duration = Duration::from_millis(400);
 
 /// Clipboard-based inserter. The clipboard sits behind a `Mutex` so `insert`
 /// takes `&self` and concurrent inserts are serialized.
@@ -58,6 +68,7 @@ pub struct ClipboardInserter<C: Clipboard, K: Keystroke> {
     app_name: Box<dyn Fn() -> Option<String> + Send + Sync>,
     clock: Box<dyn Fn() -> Instant + Send + Sync>,
     last: Mutex<Option<LastInsert>>,
+    copy_wait: Duration,
 }
 
 /// How long after an insertion the cursor is assumed to still sit right behind it.
@@ -92,6 +103,7 @@ impl<C: Clipboard, K: Keystroke> ClipboardInserter<C, K> {
             app_name: Box::new(frontmost_app_name),
             clock: Box::new(Instant::now),
             last: Mutex::new(None),
+            copy_wait: COPY_WAIT,
         }
     }
 
@@ -189,6 +201,42 @@ impl<C: Clipboard + Send, K: Keystroke + Send + Sync> Inserter for ClipboardInse
         InsertOutcome::Pasted
     }
 
+    fn selected_text(&self) -> Option<String> {
+        if (self.secure_input)() || !(self.can_post_keys)() {
+            return None;
+        }
+        let mut cb = self.clipboard.lock().unwrap_or_else(|e| e.into_inner());
+        let snapshot = cb.snapshot();
+        cb.set_text(COPY_SENTINEL).ok()?;
+        let copied = self.keystroke.copy();
+        let mut selection = None;
+        if copied.is_ok() {
+            let deadline = Instant::now() + self.copy_wait;
+            loop {
+                match cb.snapshot() {
+                    ClipboardSnapshot::Text(t) if t != COPY_SENTINEL => {
+                        selection = Some(t);
+                        break;
+                    }
+                    _ if Instant::now() >= deadline => break,
+                    _ => std::thread::sleep(Duration::from_millis(20)),
+                }
+            }
+        } else if let Err(e) = copied {
+            tracing::warn!("could not copy the selection: {e}");
+        }
+        // Put back what the user had. An Empty snapshot may be unreadable data, which we cannot
+        // restore; clearing our sentinel is the best we can do then.
+        let restored = match snapshot {
+            ClipboardSnapshot::Empty => cb.set_text(""),
+            other => cb.restore(other),
+        };
+        if let Err(e) = restored {
+            tracing::warn!("clipboard restore after copy failed: {e}");
+        }
+        selection.filter(|s| !s.trim().is_empty())
+    }
+
     fn context(&self) -> InsertContext {
         // No accessibility read of the real caret context: assume the cursor still sits right
         // behind our last paste if it went into the same app within CONTEXT_WINDOW.
@@ -218,6 +266,8 @@ mod tests {
         pasted: usize,
         /// Simulates the user copying something during the restore delay.
         change_on_paste: Option<String>,
+        /// What a synthetic copy puts on the clipboard (`None`: nothing is selected).
+        selection: Option<String>,
     }
 
     #[derive(Clone, Default)]
@@ -252,6 +302,13 @@ mod tests {
             let mut st = self.state.lock().unwrap();
             st.pasted += 1;
             if let Some(t) = st.change_on_paste.take() {
+                st.content = ClipboardSnapshot::Text(t);
+            }
+            Ok(())
+        }
+        fn copy(&self) -> Result<()> {
+            let mut st = self.state.lock().unwrap();
+            if let Some(t) = st.selection.clone() {
                 st.content = ClipboardSnapshot::Text(t);
             }
             Ok(())
@@ -392,6 +449,29 @@ mod tests {
         st.lock().unwrap().change_on_paste = Some("a\r\nb".into());
         ins.insert("a\nb");
         assert_eq!(st.lock().unwrap().restored.len(), 1);
+    }
+
+    #[test]
+    fn selected_text_is_read_and_the_clipboard_restored() {
+        let (ins, st) = rig(ClipboardSnapshot::Text("old".into()), false, false);
+        st.lock().unwrap().selection = Some("hey there".into());
+        assert_eq!(ins.selected_text().as_deref(), Some("hey there"));
+        assert!(matches!(&st.lock().unwrap().content, ClipboardSnapshot::Text(t) if t == "old"));
+    }
+
+    #[test]
+    fn no_selection_reads_as_none_and_leaves_no_sentinel() {
+        let (mut ins, st) = rig(ClipboardSnapshot::Empty, false, false);
+        ins.copy_wait = Duration::from_millis(30);
+        assert_eq!(ins.selected_text(), None);
+        assert!(matches!(&st.lock().unwrap().content, ClipboardSnapshot::Text(t) if t.is_empty()));
+    }
+
+    #[test]
+    fn selection_is_not_read_during_secure_input() {
+        let (ins, st) = rig(ClipboardSnapshot::Text("old".into()), false, true);
+        st.lock().unwrap().selection = Some("secret".into());
+        assert_eq!(ins.selected_text(), None);
     }
 
     #[test]

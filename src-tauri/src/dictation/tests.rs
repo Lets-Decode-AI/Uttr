@@ -14,11 +14,13 @@ use super::*;
 use crate::audio::{FRAME_LEN, RecorderError, RecordingStats, SAMPLE_RATE};
 use crate::hotkey::HotkeyEvent;
 use crate::insert::{InsertOutcome, Inserter};
+use crate::llm::TextAi;
 use crate::models::InstalledModel;
 use crate::models::catalog::{CatalogEntry, EngineKind};
 use crate::postprocess::InsertContext;
 use crate::store::Store;
 use crate::stt::{Chunk, SttError};
+use crate::style::Style;
 
 const SR: usize = SAMPLE_RATE as usize;
 
@@ -208,6 +210,7 @@ struct FakeInserter {
     inserted: Mutex<Vec<String>>,
     outcome: Mutex<InsertOutcome>,
     panic_next: std::sync::atomic::AtomicBool,
+    selection: Mutex<Option<String>>,
 }
 impl Inserter for FakeInserter {
     fn insert(&self, text: &str) -> InsertOutcome {
@@ -220,8 +223,44 @@ impl Inserter for FakeInserter {
     fn context(&self) -> InsertContext {
         InsertContext { prev_char: None }
     }
+    fn selected_text(&self) -> Option<String> {
+        self.selection.lock().unwrap().clone()
+    }
 }
 
+/// AI stand-in: scripted answers, and a log of what it was asked.
+#[derive(Default)]
+struct FakeAi {
+    style: Mutex<Style>,
+    /// `None`: cleanup off.
+    clean: Mutex<Option<Result<String, String>>>,
+    command: Mutex<Option<Result<String, String>>>,
+    not_ready: Mutex<Option<String>>,
+    asked: Mutex<Vec<String>>,
+}
+impl TextAi for FakeAi {
+    fn style_for(&self, _app: Option<&str>) -> Style {
+        *self.style.lock().unwrap()
+    }
+    fn clean(&self, text: &str, _: Style, _: &[String]) -> Result<Option<String>, String> {
+        self.asked.lock().unwrap().push(format!("clean:{text}"));
+        self.clean.lock().unwrap().clone().transpose()
+    }
+    fn command(&self, instruction: &str, selection: Option<&str>) -> Result<String, String> {
+        self.asked
+            .lock()
+            .unwrap()
+            .push(format!("command:{instruction}|{selection:?}"));
+        self.command
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or(Err("off".into()))
+    }
+    fn command_ready(&self) -> Result<(), String> {
+        self.not_ready.lock().unwrap().clone().map_or(Ok(()), Err)
+    }
+}
 struct Harness {
     handle: ControllerHandle,
     hk: Sender<HotkeyEvent>,
@@ -234,6 +273,7 @@ struct Harness {
     level_tx: std::sync::mpsc::SyncSender<f32>,
     mic_denied: Arc<std::sync::atomic::AtomicBool>,
     no_model_calls: Arc<AtomicUsize>,
+    ai: Arc<FakeAi>,
 }
 
 fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
@@ -243,7 +283,9 @@ fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
         inserted: Mutex::default(),
         outcome: Mutex::new(InsertOutcome::Pasted),
         panic_next: Default::default(),
+        selection: Mutex::default(),
     });
+    let ai = Arc::new(FakeAi::default());
     let store = Arc::new(Store::open_in_memory().unwrap());
     let events: Arc<Mutex<Vec<(String, Value)>>> = Arc::default();
     let esc: Arc<Mutex<Vec<bool>>> = Arc::default();
@@ -269,6 +311,7 @@ fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
         on_no_model: Arc::new(move || {
             nm.fetch_add(1, Ordering::SeqCst);
         }),
+        ai: ai.clone(),
     });
     Harness {
         handle,
@@ -282,6 +325,7 @@ fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
         level_tx,
         mic_denied,
         no_model_calls,
+        ai,
     }
 }
 
@@ -878,4 +922,152 @@ async fn no_model_asks_the_app_to_open_the_models_page() {
     h.send(HotkeyEvent::Pressed);
     wait_for("error", || h.states().iter().any(|s| s["kind"] == "error")).await;
     assert_eq!(h.no_model_calls.load(Ordering::SeqCst), 1);
+}
+
+// ---- Part 2: AI cleanup, styles, snippets, Command Mode -------------------------------------
+
+/// Hold, speak for a second, release; waits until the dictation is saved or failed.
+async fn dictate(h: &Harness, command: bool) {
+    h.send(HotkeyEvent::Pressed);
+    wait_for("recording started", || {
+        h.rec.starts.load(Ordering::SeqCst) >= 1
+    })
+    .await;
+    if command {
+        h.send(HotkeyEvent::Command);
+    }
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    wait_for("back to idle", || {
+        let k = h.kinds();
+        k.len() > 2 && k.last().map(String::as_str) == Some("idle")
+    })
+    .await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn ai_cleanup_is_inserted_and_the_raw_text_kept() {
+    let h = harness(voiced(2.0), true);
+    h.stt.push("um so lets meet at two no three", None);
+    *h.ai.clean.lock().unwrap() = Some(Ok("So let's meet at three.".into()));
+    dictate(&h, false).await;
+    wait_for("persisted", || h.saved().len() == 1).await;
+    assert_eq!(h.inserted(), ["So let's meet at three."]);
+    assert_eq!(h.saved()[0].raw_text, "um so lets meet at two no three");
+    assert!(h.toasts().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn failed_ai_cleanup_falls_back_to_the_transcript_and_warns() {
+    let h = harness(voiced(2.0), true);
+    h.stt.push("hello there friend", None);
+    *h.ai.clean.lock().unwrap() = Some(Err("timeout".into()));
+    dictate(&h, false).await;
+    wait_for("inserted", || h.inserted().len() == 1).await;
+    assert_eq!(h.inserted(), ["Hello there friend"]);
+    let toasts = h.toasts();
+    assert_eq!(toasts[0]["message"], AI_CLEANUP_FAILED);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_app_style_shapes_the_text() {
+    let h = harness(voiced(2.0), true);
+    h.stt.push("Sounds good.", None);
+    *h.ai.style.lock().unwrap() = Style::VeryCasual;
+    dictate(&h, false).await;
+    wait_for("inserted", || h.inserted().len() == 1).await;
+    assert_eq!(h.inserted(), ["sounds good"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_snippet_said_alone_inserts_its_expansion_without_ai() {
+    let h = harness(voiced(2.0), true);
+    h.store
+        .snippet_add("my calendar link", "https://cal.example/me")
+        .unwrap();
+    h.stt.push("My calendar link.", None);
+    *h.ai.clean.lock().unwrap() = Some(Ok("should not be used".into()));
+    dictate(&h, false).await;
+    wait_for("inserted", || h.inserted().len() == 1).await;
+    assert_eq!(h.inserted(), ["https://cal.example/me"]);
+    assert!(h.ai.asked.lock().unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn snippets_expand_inside_a_sentence() {
+    let h = harness(voiced(2.0), true);
+    h.store.snippet_add("my email", "sam@example.com").unwrap();
+    h.stt.push("send it to my email please", None);
+    dictate(&h, false).await;
+    wait_for("inserted", || h.inserted().len() == 1).await;
+    assert_eq!(h.inserted(), ["Send it to sam@example.com please"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn command_mode_rewrites_the_selection() {
+    let h = harness(voiced(2.0), true);
+    h.stt.push("make this more formal", None);
+    *h.ins.selection.lock().unwrap() = Some("hey whats up".into());
+    *h.ai.command.lock().unwrap() = Some(Ok("Hello, how are you?".into()));
+    dictate(&h, true).await;
+    wait_for("inserted", || h.inserted().len() == 1).await;
+    assert_eq!(h.inserted(), ["Hello, how are you?"]);
+    assert_eq!(
+        *h.ai.asked.lock().unwrap(),
+        ["command:make this more formal|Some(\"hey whats up\")"]
+    );
+    let states = h.states();
+    assert!(
+        states
+            .iter()
+            .any(|s| s["kind"] == "recording" && s["command"] == true),
+        "the Flow Bar is told it is Command Mode: {states:?}"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn command_mode_failure_inserts_nothing_and_says_why() {
+    let h = harness(voiced(2.0), true);
+    h.stt.push("summarize this", None);
+    *h.ai.command.lock().unwrap() = Some(Err("The API key was rejected.".into()));
+    h.send(HotkeyEvent::Pressed);
+    wait_for("recording started", || {
+        h.rec.starts.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    h.send(HotkeyEvent::Command);
+    advance(1000).await;
+    h.send(HotkeyEvent::Released);
+    // The error stays on screen until the next tick, so wait for it rather than for idle.
+    wait_for("error shown", || {
+        h.states().iter().any(|s| {
+            s["kind"] == "error"
+                && s["message"]
+                    .as_str()
+                    .is_some_and(|m| m.contains("API key was rejected"))
+        })
+    })
+    .await;
+    assert!(h.inserted().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn command_mode_without_ai_cancels_and_explains() {
+    let h = harness(voiced(2.0), true);
+    *h.ai.not_ready.lock().unwrap() = Some(crate::llm::NEEDS_PROVIDER.into());
+    h.send(HotkeyEvent::Pressed);
+    wait_for("recording started", || {
+        h.rec.starts.load(Ordering::SeqCst) == 1
+    })
+    .await;
+    h.send(HotkeyEvent::Command);
+    wait_for("cancelled", || h.rec.cancels.load(Ordering::SeqCst) == 1).await;
+    wait_for("idle", || {
+        h.kinds().last().map(String::as_str) == Some("idle")
+    })
+    .await;
+    assert_eq!(h.toasts()[0]["message"], crate::llm::NEEDS_PROVIDER);
+    h.send(HotkeyEvent::Released);
+    settle().await;
+    assert!(h.inserted().is_empty() && h.saved().is_empty());
 }

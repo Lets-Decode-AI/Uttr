@@ -2,7 +2,7 @@ use anyhow::Result;
 use rusqlite::Connection;
 
 /// Ordered list of migrations; index + 1 is the schema version it produces.
-const MIGRATIONS: &[&str] = &[
+pub(crate) const MIGRATIONS: &[&str] = &[
     // v1
     "CREATE TABLE transcripts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,6 +32,12 @@ const MIGRATIONS: &[&str] = &[
         total INTEGER NOT NULL,
         status TEXT NOT NULL,
         PRIMARY KEY (model_id, file)
+    );",
+    // v2
+    "CREATE TABLE snippets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trigger TEXT NOT NULL,
+        expansion TEXT NOT NULL
     );",
 ];
 

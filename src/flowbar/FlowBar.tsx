@@ -78,12 +78,15 @@ export default function FlowBar() {
       <div
         data-testid={kind === 'idle' ? 'flowbar-idle' : 'flowbar-pill'}
         data-kind={kind}
-        className={`fb-pill fb-${kind}${kind === 'toast' ? ` fb-toast-${toast?.level === 'error' ? 'error' : 'warning'}` : ''}`}
+        className={`fb-pill fb-${kind}${kind === 'recording' && state.kind === 'recording' && state.command ? ' fb-command' : ''}${kind === 'toast' ? ` fb-toast-${toast?.level === 'error' ? 'error' : 'warning'}` : ''}`}
       >
         {kind === 'recording' && (
           <>
             {state.kind === 'recording' && state.handsFree && (
               <span data-testid="hands-free-dot" className="fb-dot" />
+            )}
+            {state.kind === 'recording' && state.command && (
+              <span data-testid="command-label" className="fb-cmd">Command</span>
             )}
             <Waveform level={level} />
           </>
