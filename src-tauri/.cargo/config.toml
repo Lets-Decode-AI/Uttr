@@ -9,3 +9,8 @@ rustflags = ["-C", "relocation-model=dynamic-no-pic"]
 # to every link step (sherpa-rs is also linked as its own dll).
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=advapi32.lib"]
+
+# llama.cpp (on-device AI) is built by llama-cpp-sys-2 with CMake. On Windows it must use
+# the same static C runtime as everything else; the variable only affects MSVC builds.
+[env]
+LLAMA_STATIC_CRT = "1"
