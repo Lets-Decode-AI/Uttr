@@ -101,13 +101,69 @@ fn set_dock_presence(app: &AppHandle, visible: bool) {
 
 #[cfg(target_os = "macos")]
 mod flowbar_macos {
-    use objc2_app_kit::{NSStatusWindowLevel, NSWindow, NSWindowCollectionBehavior as B};
+    use std::sync::OnceLock;
+
+    use objc2::runtime::{AnyClass, AnyObject, Bool, ClassBuilder, Sel};
+    use objc2_app_kit::{
+        NSPanel, NSStatusWindowLevel, NSWindow, NSWindowCollectionBehavior as B, NSWindowStyleMask,
+    };
 
     /// Spaces and full-screen apps each have their own Space. `visibleOnAllWorkspaces` covers
     /// ordinary Spaces only; the Flow Bar also needs `FullScreenAuxiliary` to appear over
     /// full-screen apps, and a status-bar level to stay above their windows.
     pub fn behavior(current: B) -> B {
         current | B::CanJoinAllSpaces | B::FullScreenAuxiliary | B::Stationary | B::IgnoresCycle
+    }
+
+    /// macOS keeps a regular app's windows off other apps' full-screen Spaces (uttr is a
+    /// regular app while its main window is open). A non-activating panel is allowed there.
+    pub fn panel_style(current: NSWindowStyleMask) -> NSWindowStyleMask {
+        current | NSWindowStyleMask::NonactivatingPanel
+    }
+
+    extern "C-unwind" fn never(_: &AnyObject, _: Sel) -> Bool {
+        Bool::NO
+    }
+
+    /// An NSPanel with the same layout as tao's window class (one `focusable` Bool ivar), so
+    /// the Flow Bar's window can switch to it in place.
+    pub fn panel_class() -> &'static AnyClass {
+        static CLASS: OnceLock<&'static AnyClass> = OnceLock::new();
+        CLASS.get_or_init(|| {
+            let mut b = ClassBuilder::new(c"UttrFlowBarPanel", objc2::class!(NSPanel))
+                .expect("UttrFlowBarPanel is registered once");
+            b.add_ivar::<Bool>(c"focusable");
+            // SAFETY: the signatures match `-canBecomeKeyWindow` and `-canBecomeMainWindow`.
+            unsafe {
+                b.add_method(
+                    objc2::sel!(canBecomeKeyWindow),
+                    never as extern "C-unwind" fn(_, _) -> _,
+                );
+                b.add_method(
+                    objc2::sel!(canBecomeMainWindow),
+                    never as extern "C-unwind" fn(_, _) -> _,
+                );
+            }
+            b.register()
+        })
+    }
+
+    /// Turns the Flow Bar into a non-activating panel. Returns false (and leaves the window
+    /// alone) if tao's window layout ever stops matching the panel's.
+    fn make_panel(win: &NSWindow) -> bool {
+        let obj: &AnyObject = win.as_ref();
+        let panel = panel_class();
+        if obj.class() == panel {
+            return true;
+        }
+        if obj.class().instance_size() != panel.instance_size() {
+            tracing::warn!("the Flow Bar window layout changed; it may hide over full-screen apps");
+            return false;
+        }
+        // SAFETY: same instance size and ivars, and NSPanel is an NSWindow subclass, so every
+        // existing reference stays valid. Runs on the main thread before the window is used.
+        unsafe { AnyObject::set_class(obj, panel) };
+        true
     }
 
     /// Must run on the main thread.
@@ -118,6 +174,14 @@ mod flowbar_macos {
         };
         // SAFETY: Tauri returns the window's live NSWindow; we are on the main thread (setup).
         let win: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+        if make_panel(win) {
+            // SAFETY: `make_panel` just made this object an NSPanel.
+            let panel: &NSPanel = unsafe { &*(ptr as *const NSPanel) };
+            panel.setStyleMask(panel_style(panel.styleMask()));
+            panel.setFloatingPanel(true);
+            // Panels hide when their app is in the background, which is always for the Flow Bar.
+            panel.setHidesOnDeactivate(false);
+        }
         win.setCollectionBehavior(behavior(win.collectionBehavior()));
         win.setLevel(NSStatusWindowLevel);
         win.orderFrontRegardless();
@@ -135,6 +199,23 @@ mod flowbar_macos {
     #[cfg(test)]
     mod tests {
         use super::*;
+        use objc2::runtime::{AnyClass, Bool, ClassBuilder};
+
+        #[test]
+        fn panel_has_the_same_layout_as_the_tao_window() {
+            // Tao's window class: an NSWindow subclass with one `focusable` Bool ivar.
+            let mut b = ClassBuilder::new(c"UttrTestTaoWindow", objc2::class!(NSWindow)).unwrap();
+            b.add_ivar::<Bool>(c"focusable");
+            let tao: &AnyClass = b.register();
+            assert_eq!(panel_class().instance_size(), tao.instance_size());
+            assert!(panel_class().instance_variable(c"focusable").is_some());
+        }
+
+        #[test]
+        fn flowbar_panel_never_activates_uttr() {
+            let m = panel_style(NSWindowStyleMask::Borderless);
+            assert!(m.contains(NSWindowStyleMask::NonactivatingPanel));
+        }
 
         #[test]
         fn flowbar_joins_full_screen_spaces() {
