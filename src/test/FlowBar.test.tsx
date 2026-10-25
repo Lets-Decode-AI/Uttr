@@ -54,6 +54,16 @@ describe('FlowBar', () => {
     expect(screen.getByTestId('hands-free-dot')).toBeTruthy();
   });
 
+  it('normal_speech_levels_move_the_bars', async () => {
+    await mount();
+    setState({ kind: 'recording', handsFree: false });
+    // Raw microphone RMS: normal speech sits around 0.01 to 0.05, silence near 0.001.
+    for (const l of [0.001, 0.02, 0.04, 0.015]) emit('level', l);
+    const levels = screen.getAllByTestId('wave-bar').map((b) => Number(b.getAttribute('data-level')));
+    expect(Math.max(...levels)).toBeGreaterThan(0.4);
+    expect(levels[12]).toBeLessThan(0.1);
+  });
+
   it('renders_error_message', async () => {
     await mount();
     setState({ kind: 'error', message: 'No model installed' });

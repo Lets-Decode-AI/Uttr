@@ -5,9 +5,20 @@ export const BAR_COUNT = 16;
 const VARIATION = [0.82, 0.95, 0.88, 1, 0.9, 0.97, 0.85, 1, 0.93, 0.86, 0.98, 0.9, 1, 0.84, 0.94, 0.88];
 const MIN_SCALE = 0.12;
 const DECAY_MS = 120;
+/** Loudness range shown by the bars: at or below FLOOR_DB is flat, CEIL_DB is full height. */
+const FLOOR_DB = -55;
+const CEIL_DB = -15;
 
-/** Scrolling 16-bar voice waveform. Bars are driven by `level` (~0..1) and animated with
- * transforms only: fast attack, ~120 ms exponential decay. */
+/** Maps raw microphone RMS (normal speech is roughly 0.01 to 0.05) to 0..1 on a decibel
+ * scale, so ordinary speech fills most of the bar height. */
+export function loudness(rms: number): number {
+  if (!(rms > 0)) return 0;
+  const db = 20 * Math.log10(rms);
+  return Math.min(1, Math.max(0, (db - FLOOR_DB) / (CEIL_DB - FLOOR_DB)));
+}
+
+/** Scrolling 16-bar voice waveform. Bars are driven by the raw mic `level` (RMS) and animated
+ * with transforms only: fast attack, ~120 ms exponential decay. */
 export default function Waveform({ level }: { level: number }) {
   const [targets, setTargets] = useState<number[]>(() => Array(BAR_COUNT).fill(0));
   const barRefs = useRef<(HTMLSpanElement | null)[]>([]);
@@ -17,8 +28,7 @@ export default function Waveform({ level }: { level: number }) {
 
   // Newest sample enters on the right; older ones shift left.
   useEffect(() => {
-    const v = Math.min(1, Math.max(0, level));
-    setTargets((t) => [...t.slice(1), v]);
+    setTargets((t) => [...t.slice(1), loudness(level)]);
   }, [level]);
 
   useEffect(() => {

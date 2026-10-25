@@ -6,6 +6,43 @@ pub fn frontmost_app_name() -> Option<String> {
     imp::frontmost_app_name()
 }
 
+/// Whether keyboard focus is somewhere text can be pasted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Focus {
+    Editable,
+    NotEditable,
+    /// The app does not say (some Electron and web apps); paste as before.
+    Unknown,
+}
+
+/// Classifies the accessibility role of the focused element. `None` means macOS reported no
+/// focused element, which Electron apps (Claude, Slack, VS Code) do even while a text box has
+/// focus, so only a known non-text role stops the paste.
+pub fn classify_role(role: Option<&str>) -> Focus {
+    match role {
+        None => Focus::Unknown,
+        Some("AXTextField" | "AXTextArea" | "AXComboBox" | "AXSearchField") => Focus::Editable,
+        Some(
+            "AXButton" | "AXList" | "AXOutline" | "AXTable" | "AXRow" | "AXCell" | "AXImage"
+            | "AXMenu" | "AXMenuBar" | "AXMenuItem" | "AXMenuBarItem" | "AXBrowser" | "AXCheckBox"
+            | "AXRadioButton" | "AXSlider" | "AXScrollArea" | "AXDockItem",
+        ) => Focus::NotEditable,
+        Some(_) => Focus::Unknown,
+    }
+}
+
+/// macOS: what currently has keyboard focus. Elsewhere `Unknown` (paste as before).
+pub fn focused_element() -> Focus {
+    imp::focused_element()
+}
+
+/// macOS: whether this app may post synthetic key events, using the same Accessibility check as
+/// the permission banner (`CGPreflightPostEventAccess` can say no while Accessibility is on).
+/// Checking first avoids the system's "Accessibility Access (Events)" prompt. True elsewhere.
+pub fn can_post_keys() -> bool {
+    imp::can_post_keys()
+}
+
 /// macOS: whether Secure Event Input is on (password fields; synthetic keys
 /// are swallowed). Always false elsewhere.
 pub fn secure_input_active() -> bool {
@@ -35,6 +72,8 @@ pub fn is_wayland() -> bool {
 
 #[cfg(target_os = "macos")]
 mod imp {
+    use core_foundation::base::{CFType, CFTypeRef, TCFType};
+    use core_foundation::string::{CFString, CFStringRef};
     use objc2_app_kit::NSWorkspace;
 
     #[link(name = "Carbon", kind = "framework")]
@@ -50,6 +89,48 @@ mod imp {
     pub fn secure_input_active() -> bool {
         // SAFETY: no-argument Carbon query with no side effects.
         unsafe { IsSecureEventInputEnabled() != 0 }
+    }
+
+    #[link(name = "ApplicationServices", kind = "framework")]
+    unsafe extern "C" {
+        fn AXUIElementCreateSystemWide() -> CFTypeRef;
+        fn AXUIElementCopyAttributeValue(
+            element: CFTypeRef,
+            attribute: CFStringRef,
+            value: *mut CFTypeRef,
+        ) -> i32;
+        fn AXIsProcessTrusted() -> bool;
+    }
+
+    /// Copies an attribute; the returned object is owned (create rule).
+    fn copy_attr(element: CFTypeRef, name: &str) -> Result<CFType, i32> {
+        let name = CFString::new(name);
+        let mut value: CFTypeRef = std::ptr::null();
+        // SAFETY: `element` is a live AXUIElement, `value` is a valid out pointer.
+        let err = unsafe {
+            AXUIElementCopyAttributeValue(element, name.as_concrete_TypeRef(), &mut value)
+        };
+        if err != 0 || value.is_null() {
+            return Err(err);
+        }
+        // SAFETY: Copy functions return a +1 reference we now own.
+        Ok(unsafe { CFType::wrap_under_create_rule(value) })
+    }
+
+    pub fn focused_element() -> super::Focus {
+        // SAFETY: returns a +1 system-wide element we wrap and release.
+        let system = unsafe { CFType::wrap_under_create_rule(AXUIElementCreateSystemWide()) };
+        let role = copy_attr(system.as_CFTypeRef(), "AXFocusedUIElement")
+            .ok()
+            .and_then(|f| copy_attr(f.as_CFTypeRef(), "AXRole").ok())
+            .and_then(|r| r.downcast::<CFString>())
+            .map(|r| r.to_string());
+        super::classify_role(role.as_deref())
+    }
+
+    pub fn can_post_keys() -> bool {
+        // SAFETY: no-argument query; does not show a prompt.
+        unsafe { AXIsProcessTrusted() }
     }
 }
 
@@ -96,6 +177,12 @@ mod imp {
     pub fn secure_input_active() -> bool {
         false
     }
+    pub fn focused_element() -> super::Focus {
+        super::Focus::Unknown
+    }
+    pub fn can_post_keys() -> bool {
+        true
+    }
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -105,5 +192,43 @@ mod imp {
     }
     pub fn secure_input_active() -> bool {
         false
+    }
+    pub fn focused_element() -> super::Focus {
+        super::Focus::Unknown
+    }
+    pub fn can_post_keys() -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_roles_are_editable() {
+        for r in ["AXTextField", "AXTextArea", "AXComboBox"] {
+            assert_eq!(classify_role(Some(r)), Focus::Editable, "{r}");
+        }
+    }
+
+    #[test]
+    fn unreported_focus_still_pastes() {
+        // Electron apps such as Claude report no focused element while a text box has focus.
+        assert_eq!(classify_role(None), Focus::Unknown);
+    }
+
+    #[test]
+    fn non_text_roles_are_not_editable() {
+        for r in ["AXButton", "AXList", "AXTable", "AXScrollArea", "AXImage"] {
+            assert_eq!(classify_role(Some(r)), Focus::NotEditable, "{r}");
+        }
+    }
+
+    #[test]
+    fn unclear_roles_are_unknown_so_paste_still_happens() {
+        for r in ["AXWebArea", "AXGroup", "AXWindow", "AXStaticText"] {
+            assert_eq!(classify_role(Some(r)), Focus::Unknown, "{r}");
+        }
     }
 }

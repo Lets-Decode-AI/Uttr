@@ -19,7 +19,13 @@ const MODIFIER: Key = Key::Control;
 
 impl Keystroke for EnigoKeystroke {
     fn paste(&self) -> Result<()> {
-        let mut enigo = Enigo::new(&Settings::default()).map_err(|e| anyhow!("enigo init: {e}"))?;
+        // uttr shows its own permission banner; enigo must not open the system dialog on
+        // every paste.
+        let settings = Settings {
+            open_prompt_to_get_permissions: false,
+            ..Settings::default()
+        };
+        let mut enigo = Enigo::new(&settings).map_err(|e| anyhow!("enigo init: {e}"))?;
         enigo
             .key(MODIFIER, Direction::Press)
             .map_err(|e| anyhow!("modifier press: {e}"))?;

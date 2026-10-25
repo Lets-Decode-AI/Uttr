@@ -13,10 +13,25 @@ use clipboard::{Clipboard, ClipboardSnapshot, SystemClipboard};
 pub use keystroke::Runner;
 use keystroke::{EnigoKeystroke, Keystroke, MainThreadKeystroke};
 
-pub use frontmost::{detect_wayland, frontmost_app_name, is_wayland, secure_input_active};
+pub use frontmost::{
+    Focus, can_post_keys, detect_wayland, focused_element, frontmost_app_name, is_wayland,
+    secure_input_active,
+};
 
 /// Delay between the synthetic paste and restoring the previous clipboard.
 pub const RESTORE_DELAY: Duration = Duration::from_millis(150);
+
+/// Shown instead of pasting when nothing that accepts text has focus.
+#[cfg(target_os = "macos")]
+pub const NO_TEXT_FIELD: &str =
+    "Click into a text box first. Your text is on the clipboard: press \u{2318}V to paste it.";
+#[cfg(not(target_os = "macos"))]
+pub const NO_TEXT_FIELD: &str =
+    "Click into a text box first. Your text is on the clipboard: press Ctrl+V to paste it.";
+
+/// Shown instead of pasting when uttr may not send key presses yet.
+pub const NO_KEYSTROKE_ACCESS: &str =
+    "uttr can't type into other apps yet. Allow uttr in Accessibility, then restart uttr.";
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InsertOutcome {
@@ -38,6 +53,8 @@ pub struct ClipboardInserter<C: Clipboard, K: Keystroke> {
     keystroke: K,
     pub restore_delay: Duration,
     secure_input: Box<dyn Fn() -> bool + Send + Sync>,
+    focus: Box<dyn Fn() -> Focus + Send + Sync>,
+    can_post_keys: Box<dyn Fn() -> bool + Send + Sync>,
     app_name: Box<dyn Fn() -> Option<String> + Send + Sync>,
     clock: Box<dyn Fn() -> Instant + Send + Sync>,
     last: Mutex<Option<LastInsert>>,
@@ -70,6 +87,8 @@ impl<C: Clipboard, K: Keystroke> ClipboardInserter<C, K> {
             keystroke,
             restore_delay: RESTORE_DELAY,
             secure_input: Box::new(secure_input_active),
+            focus: Box::new(focused_element),
+            can_post_keys: Box::new(can_post_keys),
             app_name: Box::new(frontmost_app_name),
             clock: Box::new(Instant::now),
             last: Mutex::new(None),
@@ -104,6 +123,16 @@ impl<C: Clipboard, K: Keystroke> ClipboardInserter<C, K> {
         self.secure_input = Box::new(f);
         self
     }
+
+    pub fn with_focus(mut self, f: impl Fn() -> Focus + Send + Sync + 'static) -> Self {
+        self.focus = Box::new(f);
+        self
+    }
+
+    pub fn with_can_post_keys(mut self, f: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        self.can_post_keys = Box::new(f);
+        self
+    }
 }
 
 impl ClipboardInserter<SystemClipboard, MainThreadKeystroke<EnigoKeystroke>> {
@@ -127,6 +156,13 @@ impl<C: Clipboard + Send, K: Keystroke + Send + Sync> Inserter for ClipboardInse
         }
         if (self.secure_input)() {
             return InsertOutcome::CopiedOnly("secure input is active".into());
+        }
+        // The text stays on the clipboard in both cases below, so nothing is lost.
+        if !(self.can_post_keys)() {
+            return InsertOutcome::CopiedOnly(NO_KEYSTROKE_ACCESS.into());
+        }
+        if (self.focus)() == Focus::NotEditable {
+            return InsertOutcome::CopiedOnly(NO_TEXT_FIELD.into());
         }
         if let Err(e) = self.keystroke.paste() {
             // Intentional: the dictated text stays on the clipboard so the
@@ -239,7 +275,9 @@ mod tests {
         };
         let ins = ClipboardInserter::new(cb, keys)
             .with_restore_delay(Duration::ZERO)
-            .with_secure_input(move || secure);
+            .with_secure_input(move || secure)
+            .with_focus(|| Focus::Editable)
+            .with_can_post_keys(|| true);
         (ins, state)
     }
 
@@ -304,6 +342,38 @@ mod tests {
         assert_eq!(st.pasted, 0);
         assert!(st.restored.is_empty());
         assert!(matches!(&st.content, ClipboardSnapshot::Text(t) if t == "new"));
+    }
+
+    #[test]
+    fn no_text_box_keeps_text_on_clipboard_and_says_so() {
+        let (ins, st) = rig(ClipboardSnapshot::Text("old".into()), false, false);
+        let ins = ins.with_focus(|| Focus::NotEditable);
+        assert_eq!(
+            ins.insert("new"),
+            InsertOutcome::CopiedOnly(NO_TEXT_FIELD.into())
+        );
+        let st = st.lock().unwrap();
+        assert_eq!(st.pasted, 0);
+        assert!(matches!(&st.content, ClipboardSnapshot::Text(t) if t == "new"));
+    }
+
+    #[test]
+    fn unknown_focus_still_pastes() {
+        let (ins, st) = rig(ClipboardSnapshot::Text("old".into()), false, false);
+        let ins = ins.with_focus(|| Focus::Unknown);
+        assert_eq!(ins.insert("new"), InsertOutcome::Pasted);
+        assert_eq!(st.lock().unwrap().pasted, 1);
+    }
+
+    #[test]
+    fn missing_keystroke_permission_does_not_paste() {
+        let (ins, st) = rig(ClipboardSnapshot::Text("old".into()), false, false);
+        let ins = ins.with_can_post_keys(|| false);
+        assert_eq!(
+            ins.insert("new"),
+            InsertOutcome::CopiedOnly(NO_KEYSTROKE_ACCESS.into())
+        );
+        assert_eq!(st.lock().unwrap().pasted, 0);
     }
 
     #[test]

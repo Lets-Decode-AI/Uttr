@@ -513,7 +513,13 @@ impl Controller {
                         }
                         if let InsertOutcome::CopiedOnly(reason) = &outcome {
                             tracing::info!("text was copied but not pasted: {reason}");
-                            self.toast("warning", COPIED_ONLY_MESSAGE);
+                            // These reasons are written for the user; others are technical.
+                            let message = match reason.as_str() {
+                                crate::insert::NO_TEXT_FIELD
+                                | crate::insert::NO_KEYSTROKE_ACCESS => reason.as_str(),
+                                _ => COPIED_ONLY_MESSAGE,
+                            };
+                            self.toast("warning", message);
                         }
                         outcome
                     }
