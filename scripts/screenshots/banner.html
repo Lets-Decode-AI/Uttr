@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>uttr banner</title>
+    <!-- Renders docs/images/banner.png (?w=1280&h=320) and social-preview.png (?w=1280&h=640). -->
+    <style>
+      html, body { margin: 0; }
+      body {
+        --forest: #274B40; --forest-deep: #1B352D; --cream: #F3F0E8; --sage: #9FD3B8;
+        width: var(--w); height: var(--h); overflow: hidden; box-sizing: border-box;
+        background: radial-gradient(120% 140% at 85% 20%, #2F5A4D 0%, var(--forest) 45%, var(--forest-deep) 100%);
+        color: var(--cream); font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
+        display: flex; align-items: center; padding: 0 calc(var(--h) * 0.28);
+        gap: calc(var(--h) * 0.14);
+      }
+      body.tall { flex-direction: column; justify-content: center; text-align: center; gap: 28px; padding: 0 96px; }
+      .tile { width: calc(var(--s) * 1px); height: calc(var(--s) * 1px); flex: none; filter: drop-shadow(0 12px 32px rgba(0, 0, 0, 0.35)); }
+      h1 { margin: 0; font-size: calc(var(--s) * 0.62px); font-weight: 700; letter-spacing: -0.035em; line-height: 1; }
+      p { margin: 12px 0 0; font-size: calc(var(--s) * 0.155px); line-height: 1.35; opacity: 0.86; max-width: 44ch; }
+      body.tall p { margin: 12px auto 0; }
+      .tags { margin-top: 18px; display: flex; gap: 10px; flex-wrap: wrap; }
+      body.tall .tags { justify-content: center; }
+      .tag { font-size: calc(var(--s) * 0.105px); font-weight: 600; color: var(--sage); border: 1.5px solid rgba(159, 211, 184, 0.45); border-radius: 999px; padding: 5px 14px; }
+      .wave { margin-left: auto; display: flex; align-items: center; gap: 10px; opacity: 0.9; }
+      body.tall .wave { display: none; }
+      .wave span { width: 9px; border-radius: 9px; background: var(--cream); }
+    </style>
+  </head>
+  <body>
+    <img class="tile" src="../../src/assets/brand/uttr-icon-cream.svg" alt="" />
+    <div>
+      <h1>uttr</h1>
+      <p>Private push-to-talk dictation that runs on&nbsp;your&nbsp;computer.</p>
+      <div class="tags"><span class="tag">On-device speech</span><span class="tag">AI cleanup</span><span class="tag">Command Mode</span><span class="tag">macOS · Windows · Linux</span></div>
+    </div>
+    <div class="wave" aria-hidden="true"></div>
+    <script>
+      const q = new URLSearchParams(location.search);
+      const w = Number(q.get('w') || 1280), h = Number(q.get('h') || 320);
+      document.body.style.setProperty('--w', `${w}px`);
+      document.body.style.setProperty('--h', `${h}px`);
+      const tall = h / w > 0.4;
+      document.body.classList.toggle('tall', tall);
+      document.body.style.setProperty('--s', String(tall ? 200 : h * 0.56));
+      const wave = document.querySelector('.wave');
+      [0.35, 0.6, 0.9, 0.55, 1, 0.7, 0.4, 0.8, 0.5, 0.3].forEach((v) => {
+        const s = document.createElement('span');
+        s.style.height = `${Math.round(h * 0.42 * v)}px`;
+        wave.append(s);
+      });
+    </script>
+  </body>
+</html>

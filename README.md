@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/images/banner.png" alt="uttr: private push-to-talk dictation that runs on your computer" width="100%">
+</p>
+
 # uttr
 
 [![CI](https://github.com/Lets-Decode-AI/uttr/actions/workflows/ci.yml/badge.svg)](https://github.com/Lets-Decode-AI/uttr/actions/workflows/ci.yml)
@@ -15,7 +19,15 @@ It is a small [Tauri 2](https://tauri.app) app (Rust core, React UI) that lives 
 The installer includes everything the app needs, including the ONNX Runtime libraries. You download
 models from Hugging Face inside the app.
 
-> Status: Part 1 (core dictation and the local model manager) is done. See the [Roadmap](#roadmap).
+> Status: Part 1 (core dictation and the local model manager) and Part 2 (text intelligence: AI cleanup,
+> Command Mode, snippets and per-app styles) are done. See the [Roadmap](#roadmap).
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/history-dark.png">
+    <img src="docs/images/history-light.png" alt="The uttr window showing the History page with recent dictations" width="760">
+  </picture>
+</p>
 
 ## Features
 
@@ -29,6 +41,13 @@ models from Hugging Face inside the app.
   restored. Rich formatting (HTML or RTF) comes back as plain text. If the clipboard held something uttr cannot read,
   such as files, uttr leaves it alone instead of clearing it.
 - Personal dictionary replacements, plus basic capitalization and spacing fixes.
+- **AI cleanup** (optional): removes filler words, keeps only your self-corrections ("Tuesday, no, Wednesday"), fixes
+  punctuation and formats spoken lists. Runs on your computer with a llama.cpp model, or with your own OpenAI or
+  Anthropic API key. Any OpenAI-compatible server (Ollama, LM Studio) works too.
+- **Command Mode**: select text, hold `Fn+Ctrl` (`Ctrl+Win+Alt` on Windows and Linux) and say what to do with it,
+  such as "make this friendlier" or "translate to Spanish". With nothing selected, uttr writes new text at the cursor.
+- **Snippets**: say a short phrase such as "my calendar link" and uttr types the saved text.
+- **Styles per app**: formal, casual or very casual, chosen by the app you are dictating into (for example very casual in Slack, formal in Mail).
 - Searchable history of your dictations, stored in SQLite on your machine.
 - Low resource use. uttr stays in the tray at rest, and the model unloads after an idle timeout (10 minutes by default, or never).
 - Optional Hugging Face token for gated or private repos, stored in the system keychain.
@@ -40,14 +59,20 @@ models from Hugging Face inside the app.
 - The microphone stays open for up to 15 s after a dictation so the next one does not clip the first word. While it is open, only the latest 0.3 s of audio is held in memory.
   After 15 s it closes.
 - The only network traffic is model downloads and searches on Hugging Face, which you start yourself.
+- AI is off by default. On-device AI keeps your text on your computer. If you choose OpenAI or Anthropic, the
+  dictated **text** (never the audio) is sent to that provider, and your API key is stored in the system keychain.
 - Custom Hugging Face repos: files tracked with Git LFS are checked against their SHA-256. Other files
   (such as `tokens.txt`) are checked for size only, because Hugging Face publishes no hash for them.
 
 ## Screenshots
 
-_Screenshots will be added here. Contributions are welcome._
+| AI cleanup and Command Mode | Snippets |
+|---|---|
+| ![The AI page: provider choice, on-device models and the Command Mode shortcut](docs/images/ai-light.png) | ![The Snippets page with an email address, a calendar link and a sign-off](docs/images/snippets-light.png) |
+| **Styles per app** | **Dark theme** |
+| ![The Style page with a default style and rules for Slack, Messages and Mail](docs/images/style-light.png) | ![The AI page in the dark theme](docs/images/ai-dark.png) |
 
-<!-- Add images under docs/images/ and reference them here. -->
+The screenshots use sample data. To retake them after a UI change, see [scripts/screenshots](scripts/screenshots/README.md).
 
 ## Install
 
@@ -116,6 +141,37 @@ from the app for other sherpa-onnx repos. uttr detects compatible transducer, Wh
 On first run uttr recommends Moonshine Base on machines with little RAM, Parakeet v3 or SenseVoice when they match
 your system language, and Parakeet v2 otherwise.
 
+## AI cleanup and Command Mode
+
+Choose a provider on the **AI** page:
+
+| Provider | Where your text goes | Setup |
+|---|---|---|
+| Off (default) | Nowhere | Dictionary, snippets, styles and basic fixes still apply |
+| On this computer | Nowhere | Download a model on the AI page; it runs with [llama.cpp](https://github.com/ggml-org/llama.cpp) (Metal on Apple Silicon) |
+| OpenAI | OpenAI, or the OpenAI-compatible server you set | API key (not needed for local servers such as Ollama), model name (default `gpt-5-mini`) |
+| Anthropic | Anthropic | API key, model name (default `claude-opus-5-5`) |
+
+On-device models ([`src-tauri/resources/llm_catalog.json`](src-tauri/resources/llm_catalog.json), pinned and SHA-256 verified):
+
+| Model | Download | Min RAM | Notes |
+|---|---|---|---|
+| Qwen2.5 1.5B Instruct (Q4_K_M), **recommended** | ~1.1 GB | 4 GB | Fast; good for cleanup |
+| Llama 3.2 3B Instruct (Q4_K_M) | ~2.0 GB | 8 GB | Better rewrites for Command Mode |
+| Qwen3 4B Instruct 2507 (Q4_K_M) | ~2.5 GB | 8 GB | Best quality; slower without a GPU |
+
+How it fits together:
+
+1. A snippet said on its own ("my email") is inserted as is, without AI.
+2. Otherwise the transcript goes to the AI with your dictionary words and snippet phrases, so they are spelled
+   exactly, and the style for the app you are dictating into. Dictations of one or two words skip the AI.
+3. If the AI fails or answers instead of cleaning up, uttr inserts the plain transcript and says so in the Flow Bar.
+4. The dictionary, the style's capitalization and period rules and snippet expansion are applied last.
+
+Command Mode reads the selection with a synthetic copy (your clipboard is restored), sends your spoken instruction
+and the selection to the AI, and pastes the answer over the selection. The Flow Bar shows **Command** while you speak.
+You can also start a normal dictation and add the extra key to switch it to Command Mode.
+
 ### Measured performance
 
 From the project's integration test (Parakeet v2 int8, release build, Apple Silicon Mac). Your hardware will differ.
@@ -146,7 +202,8 @@ flowchart LR
     AU -->|16 kHz mono frames| CP[chunk planner]
     CP -->|chunks| ST[stt worker<br/>sherpa-onnx]
     MM[models manager<br/>catalog, HF, downloader] -->|active model| ST
-    ST -->|text| PP[postprocess]
+    ST -->|text| PP[postprocess<br/>snippets, style]
+    PP <-->|cleanup, commands| AI[llm<br/>llama.cpp or cloud]
     PP --> IN[insert<br/>clipboard + paste]
     DC --> DB[(store<br/>SQLite)]
     DC -->|events| UI[React UI<br/>main window + Flow Bar]
@@ -165,8 +222,10 @@ One Rust process owns audio, inference, hotkeys, I/O and persistence. The web UI
 | `stt` | `ChunkPlanner`, `SttSession`, the worker thread and the sherpa-onnx engine |
 | `models` | Catalog, Hugging Face search, resumable verified downloader, hardware detection, lifecycle |
 | `postprocess` | Spacing and capitalization fixes, dictionary replacements |
+| `llm` | AI cleanup and Command Mode: prompts, the llama.cpp worker, OpenAI and Anthropic clients |
+| `style`, `snippets` | Per-app writing styles; snippet matching and expansion |
 | `insert` | Clipboard save and restore, synthetic paste, frontmost-app lookup |
-| `store` | SQLite: transcripts, settings, dictionary, downloads, migrations |
+| `store` | SQLite: transcripts, settings, dictionary, snippets, downloads, migrations |
 | `permissions` | Per-OS permission checks and deep links |
 | `commands`, `events`, `tray`, `app_state` | Tauri command layer, event names, tray menu, shared state |
 
@@ -217,13 +276,21 @@ UTTR_MODEL_DIR="$HOME/Library/Caches/uttr Test é/parakeet-v2" \
 ```
 
 On Linux pass a destination directory to the script and use the same path for `UTTR_MODEL_DIR`.
+
+The on-device AI tests run real llama.cpp inference on any GGUF chat model (the recommended Qwen2.5 1.5B is ~1.1 GB):
+
+```bash
+cd src-tauri
+UTTR_LLM_MODEL="$HOME/Downloads/qwen2.5-1.5b-instruct-q4_k_m.gguf" \
+  cargo test --release --test llm_integration -- --ignored --nocapture
+```
 The manual end-to-end checks for dictation in real apps are listed in [docs/E2E-CHECKLIST.md](docs/E2E-CHECKLIST.md).
 
 ## Roadmap
 
 - **Linux/Wayland**: global shortcuts through the XDG GlobalShortcuts portal.
-- **Part 2, text intelligence**: local LLM cleanup (llama.cpp), an optional API key for OpenAI or Anthropic,
-  Command Mode, snippets and per-app styles.
+- ~~**Part 2, text intelligence**: local LLM cleanup (llama.cpp), an optional API key for OpenAI or Anthropic,
+  Command Mode, snippets and per-app styles.~~ Done.
 - **Part 3, dashboard**: a dashboard like Wispr's with words, WPM, streaks and time saved, plus full history.
 
 Not planned for Part 1: auto-update, accounts or sync. Release process: [docs/RELEASING.md](docs/RELEASING.md).
