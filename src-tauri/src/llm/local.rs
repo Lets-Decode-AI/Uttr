@@ -3,6 +3,7 @@
 
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::time::{Duration, Instant};
 
@@ -77,9 +78,22 @@ struct Loaded {
     model: LlamaModel,
 }
 
+/// llama.cpp's backend can be initialized once per process; every worker shares it.
+fn backend() -> Result<&'static LlamaBackend, String> {
+    static BACKEND: OnceLock<Result<LlamaBackend, String>> = OnceLock::new();
+    BACKEND
+        .get_or_init(|| {
+            llama_cpp_2::send_logs_to_tracing(
+                llama_cpp_2::LogOptions::default().with_logs_enabled(false),
+            );
+            LlamaBackend::init().map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
 fn worker(rx: Receiver<Cmd>, mut idle: Option<Duration>) {
-    llama_cpp_2::send_logs_to_tracing(llama_cpp_2::LogOptions::default().with_logs_enabled(false));
-    let backend = match LlamaBackend::init() {
+    let backend = match backend() {
         Ok(b) => b,
         Err(e) => {
             tracing::error!("llama.cpp could not start: {e}");
@@ -119,7 +133,7 @@ fn worker(rx: Receiver<Cmd>, mut idle: Option<Duration>) {
             Cmd::Unload => loaded = None,
             Cmd::Run(job) => {
                 let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    run(&backend, &mut loaded, &job.model, &job.prompt)
+                    run(backend, &mut loaded, &job.model, &job.prompt)
                 }))
                 .unwrap_or_else(|_| {
                     loaded = None;
