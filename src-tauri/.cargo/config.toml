@@ -10,7 +10,11 @@ rustflags = ["-C", "relocation-model=dynamic-no-pic"]
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=advapi32.lib"]
 
-# llama.cpp (on-device AI) is built by llama-cpp-sys-2 with CMake. On Windows it must use
-# the same static C runtime as everything else; the variable only affects MSVC builds.
+# llama.cpp (on-device AI) is built by llama-cpp-sys-2 with CMake, which forwards CMAKE_*
+# variables. On Windows it must use the same static C runtime (/MT) as everything else;
+# CMake applies the runtime through CMAKE_MSVC_RUNTIME_LIBRARY, not compiler flags. Both
+# settings only affect MSVC builds. llama.cpp uses std::filesystem, which needs macOS 10.15.
 [env]
 LLAMA_STATIC_CRT = "1"
+CMAKE_MSVC_RUNTIME_LIBRARY = "MultiThreaded"
+MACOSX_DEPLOYMENT_TARGET = "10.15"
