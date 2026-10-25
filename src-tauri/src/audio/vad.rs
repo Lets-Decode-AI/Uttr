@@ -4,8 +4,9 @@ use std::collections::VecDeque;
 
 use super::{FRAME_LEN, SAMPLE_RATE};
 
-/// Floor on the speech threshold (RMS).
-const MIN_THRESHOLD: f32 = 0.01;
+/// Floor on the speech threshold (RMS). Laptop mics pick up normal speech at about 0.02 and
+/// the end of a sentence at a third of that, so a higher floor drops trailing words.
+const MIN_THRESHOLD: f32 = 0.004;
 /// Threshold = noise floor x this factor (when above `MIN_THRESHOLD`).
 const FLOOR_MULTIPLIER: f32 = 3.0;
 /// Initial noise-floor estimate before any audio has been seen.
@@ -217,6 +218,20 @@ mod tests {
             longest_false_run(after) * 20 < 300,
             "false pause {} ms",
             longest_false_run(after) * 20
+        );
+    }
+
+    #[test]
+    fn sentence_trailing_off_is_kept() {
+        // Mic-level speech (RMS 0.02) whose last 1.5 s fades to a third, as sentences do.
+        let mut s = noise(0.5, 0.002 * 3f32.sqrt());
+        s.extend(speechlike(3.0, 0.02));
+        s.extend(speechlike(1.5, 0.007));
+        let kept = trim_silence(&s).expect("speech");
+        assert_eq!(
+            kept.len(),
+            s.len() - (0.5 * 16_000.0) as usize + PAD_SAMPLES,
+            "faded end trimmed"
         );
     }
 
