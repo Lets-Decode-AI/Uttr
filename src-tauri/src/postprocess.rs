@@ -1,4 +1,5 @@
 use crate::store::DictEntry;
+use crate::style::{Style, trim_final_period};
 
 /// Context about the insertion point. `None` = unknown (no leading space).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -7,7 +8,19 @@ pub struct InsertContext {
 }
 
 /// Tidy raw STT text before it is pasted at the cursor.
+#[cfg(test)]
 pub fn postprocess(raw: &str, dict: &[DictEntry], ctx: InsertContext) -> String {
+    postprocess_styled(raw, dict, ctx, Style::Formal)
+}
+
+/// [`postprocess`] plus the parts of a writing style that need no AI: casual styles drop the
+/// period after a single sentence, and very casual starts in lowercase.
+pub fn postprocess_styled(
+    raw: &str,
+    dict: &[DictEntry],
+    ctx: InsertContext,
+    style: Style,
+) -> String {
     let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     if collapsed.is_empty() {
         return String::new();
@@ -16,11 +29,29 @@ pub fn postprocess(raw: &str, dict: &[DictEntry], ctx: InsertContext) -> String 
     let text = if first_replaced {
         text
     } else {
-        fix_first_letter(&text, ctx.prev_char)
+        let fixed = fix_first_letter(&text, ctx.prev_char);
+        if style == Style::VeryCasual && !keeps_case(&fixed) {
+            lowercase_first(&fixed)
+        } else {
+            fixed
+        }
     };
+    with_leading_space(&trim_final_period(&text, style), ctx)
+}
+
+/// Prepends a space when the text would otherwise stick to the word before the cursor.
+pub fn with_leading_space(text: &str, ctx: InsertContext) -> String {
     match ctx.prev_char {
-        Some(c) if needs_leading_space(c) => format!(" {text}"),
-        _ => text,
+        Some(c) if needs_leading_space(c) && !text.is_empty() => format!(" {text}"),
+        _ => text.to_string(),
+    }
+}
+
+fn lowercase_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().chain(chars).collect(),
+        None => String::new(),
     }
 }
 
@@ -247,6 +278,22 @@ mod tests {
             postprocess("go to New York now", &d, ctx(None)),
             "Go to new york now"
         );
+    }
+
+    #[test]
+    fn very_casual_starts_lowercase_and_drops_the_period() {
+        let out = postprocess_styled("Sounds good.", &[], ctx(None), Style::VeryCasual);
+        assert_eq!(out, "sounds good");
+        let out = postprocess_styled("I think so.", &[], ctx(None), Style::VeryCasual);
+        assert_eq!(out, "I think so", "the pronoun I keeps its capital");
+        let out = postprocess_styled("NASA called.", &[], ctx(Some('.')), Style::VeryCasual);
+        assert_eq!(out, " NASA called");
+    }
+
+    #[test]
+    fn casual_keeps_capitals() {
+        let out = postprocess_styled("sounds good.", &[], ctx(None), Style::Casual);
+        assert_eq!(out, "Sounds good");
     }
 
     #[test]

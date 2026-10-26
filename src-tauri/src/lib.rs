@@ -5,13 +5,16 @@ pub mod dictation;
 pub mod events;
 pub mod hotkey;
 pub mod insert;
+pub mod llm;
 pub mod logging;
 mod migrate;
 pub mod models;
 pub mod permissions;
 mod postprocess;
+mod snippets;
 pub mod store;
 pub mod stt;
+pub mod style;
 pub mod tray;
 
 use std::sync::atomic::Ordering;
@@ -391,6 +394,30 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         }),
     );
     models.resume_incomplete_on_startup();
+    // On-device AI models (GGUF) share the download machinery but live in their own folder.
+    let llm_models = {
+        let h = handle.clone();
+        models::Manager::new(
+            data_dir.join("ai-models"),
+            store.clone(),
+            models::catalog::Catalog::llm_bundled(),
+            hf.clone(),
+            Arc::new(move |p| {
+                let _ = h.emit(events::DL_PROGRESS, &p);
+            }),
+        )
+        .with_active_key(models::ACTIVE_LLM_KEY)
+    };
+    llm_models.resume_incomplete_on_startup();
+    let ai_keys = llm::Keys::default();
+    {
+        let keys = ai_keys.clone();
+        std::thread::spawn(move || {
+            for p in [llm::AiProvider::OpenAi, llm::AiProvider::Anthropic] {
+                keys.set(p, commands::stored_ai_key(p));
+            }
+        });
+    }
 
     // Speech worker.
     let stt = stt::SttWorker::spawn(Box::new(stt::SherpaEngine::new()), settings.idle_unload());
@@ -411,7 +438,14 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let recorder = Arc::new(SwitchableRecorder::new(settings.mic.clone(), level_tx));
     let (hk_tx, hk_rx) = std::sync::mpsc::channel();
     let hotkey: Arc<Mutex<Option<HotkeyService>>> = Arc::default();
+    let local_llm = llm::LocalLlm::spawn(settings.idle_unload());
     let settings_arc = Arc::new(Mutex::new(settings));
+    let ai = Arc::new(llm::Ai::new(
+        settings_arc.clone(),
+        local_llm.clone(),
+        llm_models.clone(),
+        ai_keys.clone(),
+    ));
     let hotkey_starting = Arc::new(std::sync::atomic::AtomicBool::new(false));
     commands::spawn_hotkey_start(
         handle.clone(),
@@ -470,6 +504,7 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
                     });
                 }
             }),
+            ai: ai.clone(),
         })
     });
     tracing::info!("dictation controller started");
@@ -491,6 +526,10 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         dictation_state: state_cache,
         paused: std::sync::atomic::AtomicBool::new(false),
         pause_item: Mutex::default(),
+        llm_models,
+        local_llm,
+        ai_keys,
+        ai,
     });
 
     if !show_flowbar {
@@ -553,6 +592,16 @@ pub fn run() {
             commands::dictionary_delete,
             commands::mic_list,
             commands::open_log_folder,
+            commands::llm_catalog,
+            commands::llm_installed,
+            commands::ai_keys_status,
+            commands::ai_key_set,
+            commands::ai_try,
+            commands::snippet_list,
+            commands::snippet_add,
+            commands::snippet_update,
+            commands::snippet_delete,
+            commands::recent_apps,
         ])
         .setup(|app| {
             logging::init(app.path().app_log_dir().ok().as_deref());

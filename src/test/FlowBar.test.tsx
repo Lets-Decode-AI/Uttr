@@ -35,6 +35,15 @@ afterEach(() => {
 });
 
 describe('FlowBar', () => {
+  it('labels_command_mode_while_recording', async () => {
+    await mount();
+    setState({ kind: 'recording', handsFree: false });
+    expect(screen.queryByTestId('command-label')).toBeNull();
+    setState({ kind: 'recording', handsFree: false, command: true });
+    expect(screen.getByTestId('command-label').textContent).toBe('Command');
+    expect(screen.getByTestId('flowbar-pill').className).toContain('fb-command');
+  });
+
   it('renders_idle_handle', async () => {
     await mount();
     expect(screen.getByTestId('flowbar-idle')).toBeTruthy();

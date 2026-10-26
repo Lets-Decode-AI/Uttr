@@ -7,7 +7,9 @@ const CODE_TO_KEY: Record<string, Key> = {
   AltLeft: 'AltLeft', AltRight: 'AltRight', ShiftLeft: 'ShiftLeft', ShiftRight: 'ShiftRight', Space: 'Space', Fn: 'Fn',
 };
 
-const PRESETS: { label: string; keys: Key[] }[] = [
+export interface HotkeyPreset { label: string; keys: Key[] }
+
+const PRESETS: HotkeyPreset[] = [
   { label: 'Fn', keys: ['Fn'] },
   { label: 'Right ⌥', keys: ['AltRight'] },
   { label: 'Ctrl+Win/⌘', keys: ['ControlLeft', 'MetaLeft'] },
@@ -15,7 +17,7 @@ const PRESETS: { label: string; keys: Key[] }[] = [
 
 const same = (a: Binding, b: Key[]) => a.keys.length === b.length && b.every((k) => a.keys.includes(k));
 
-export default function HotkeyInput({ value, onChange }: { value: Binding; onChange: (b: Binding) => void }) {
+export default function HotkeyInput({ value, onChange, presets = PRESETS }: { value: Binding; onChange: (b: Binding) => void; presets?: HotkeyPreset[] }) {
   const [recording, setRecording] = useState(false);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
@@ -55,7 +57,7 @@ export default function HotkeyInput({ value, onChange }: { value: Binding; onCha
   return (
     <div className="hotkey">
       <div className="hotkey-choices" role="group" aria-label="Shortcut choices">
-        {PRESETS.map((p) => (
+        {presets.map((p) => (
           <Button key={p.label} aria-pressed={same(value, p.keys)} onClick={() => { setRecording(false); onChange({ keys: p.keys }); }}>
             {p.label}
           </Button>

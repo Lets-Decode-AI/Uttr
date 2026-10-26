@@ -24,6 +24,8 @@ html, body { background: transparent; overflow: hidden; }
 .fb-pill.fb-done { width: 64px; }
 .fb-pill.fb-error, .fb-pill.fb-toast { width: 208px; padding: 0 14px; }
 .fb-recording { padding: 0 18px; }
+.fb-pill.fb-command { width: 208px; }
+.fb-cmd { flex: none; font-weight: 600; color: #9FD3B8; letter-spacing: 0.01em; }
 .fb-bar {
   display: block; width: 3px; height: 24px; border-radius: 9999px; background: #F3F0E8;
   transform-origin: center; will-change: transform;

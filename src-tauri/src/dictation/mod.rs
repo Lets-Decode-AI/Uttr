@@ -23,10 +23,13 @@ use crate::audio::{Recorder, RecorderError, RecordingStats};
 use crate::events;
 use crate::hotkey::HotkeyEvent;
 use crate::insert::{InsertOutcome, Inserter};
+use crate::llm::TextAi;
 use crate::models::{InstalledModel, Manager};
-use crate::postprocess::postprocess;
-use crate::store::{NewTranscript, Store};
+use crate::postprocess::{InsertContext, postprocess_styled, with_leading_space};
+use crate::snippets;
+use crate::store::{DictEntry, NewTranscript, Snippet, Store};
 use crate::stt::{Chunk, ChunkPlanner, ChunkerConfig, SttError, SttHandle, SttSession};
+use crate::style::Style;
 /// Event emitter handed to the controller: `(event name, payload)`.
 pub type EmitFn = Arc<dyn Fn(&str, Value) + Send + Sync>;
 
@@ -117,6 +120,8 @@ pub struct ControllerDeps {
     pub mic_denied: Arc<dyn Fn() -> bool + Send + Sync>,
     /// Called when a dictation was requested but no speech model is installed.
     pub on_no_model: Arc<dyn Fn() + Send + Sync>,
+    /// AI cleanup, writing styles and Command Mode.
+    pub ai: Arc<dyn TextAi>,
 }
 
 pub struct ControllerHandle {
@@ -136,6 +141,71 @@ impl Drop for ControllerHandle {
     }
 }
 
+// ---- text pipeline --------------------------------------------------------------------------
+
+/// Turns a transcript into the text to insert: a snippet said on its own becomes its
+/// expansion; anything else gets AI cleanup (when on), the dictionary, the style's basic
+/// fixes, and snippet expansion. Returns the text and a warning when AI cleanup failed.
+fn refine(
+    raw: &str,
+    dict: &[DictEntry],
+    snippets: &[Snippet],
+    ctx: InsertContext,
+    style: Style,
+    ai: &dyn TextAi,
+) -> (String, Option<&'static str>) {
+    if let Some(expansion) = snippets::whole_match(raw, snippets) {
+        return (with_leading_space(expansion, ctx), None);
+    }
+    let keep: Vec<String> = dict
+        .iter()
+        .map(|d| d.replacement.clone().unwrap_or_else(|| d.term.clone()))
+        .chain(snippets.iter().map(|s| s.trigger.clone()))
+        .collect();
+    let (cleaned, notice) = match ai.clean(raw, style, &keep) {
+        Ok(Some(t)) => (t, None),
+        Ok(None) => (raw.to_string(), None),
+        Err(e) => {
+            tracing::warn!("AI cleanup failed: {e}");
+            (raw.to_string(), Some(AI_CLEANUP_FAILED))
+        }
+    };
+    let text = postprocess_styled(&cleaned, dict, ctx, style);
+    (snippets::expand(&text, snippets), notice)
+}
+
+/// Command Mode: reads the selection, asks the AI and pastes the answer over it (or at the
+/// cursor when nothing is selected).
+fn run_command(
+    instruction: &str,
+    inserter: &dyn Inserter,
+    ai: &dyn TextAi,
+) -> Result<Inserted, String> {
+    let instruction = instruction.split_whitespace().collect::<Vec<_>>().join(" ");
+    if instruction.is_empty() {
+        return Ok(Inserted {
+            out: None,
+            notice: None,
+        });
+    }
+    let selection = inserter.selected_text();
+    tracing::info!(
+        selected = selection.is_some(),
+        "running a Command Mode instruction"
+    );
+    let text = ai
+        .command(&instruction, selection.as_deref())
+        .map_err(|e| {
+            tracing::warn!("Command Mode failed: {e}");
+            format!("Command Mode failed. {e}")
+        })?;
+    let outcome = inserter.insert(&text);
+    Ok(Inserted {
+        out: Some((text, outcome)),
+        notice: None,
+    })
+}
+
 // ---- controller -----------------------------------------------------------------------------
 
 /// Flow Bar message when the text was only copied (the reason is logged).
@@ -143,6 +213,9 @@ impl Drop for ControllerHandle {
 pub const COPIED_ONLY_MESSAGE: &str = "Copied. Press \u{2318}V to paste.";
 #[cfg(not(target_os = "macos"))]
 pub const COPIED_ONLY_MESSAGE: &str = "Copied. Press Ctrl+V to paste.";
+
+/// Shown when AI cleanup failed and the plain transcript was inserted instead.
+pub const AI_CLEANUP_FAILED: &str = "AI cleanup didn't work, so the plain transcript was used.";
 
 /// A recording whose loudest sample stays below this (about -60 dBFS) is treated as a microphone
 /// that delivers no sound at all, rather than one that heard no speech.
@@ -162,8 +235,8 @@ enum Msg {
         res: Result<Option<String>, SttError>,
         silent: bool,
     },
-    /// `Err`: the insert task panicked.
-    InsertDone(Result<Option<(String, InsertOutcome)>, String>),
+    /// `Err`: the insert task failed (it panicked, or Command Mode failed) with this message.
+    InsertDone(Result<Inserted, String>),
     /// The recorder thread started recording `id`.
     RecStarted {
         id: u64,
@@ -181,6 +254,13 @@ enum Msg {
         id: u64,
     },
     Shutdown,
+}
+
+/// What the insert task did: the text and outcome (`None`: nothing left to insert), and a
+/// warning for the user.
+struct Inserted {
+    out: Option<(String, InsertOutcome)>,
+    notice: Option<&'static str>,
 }
 
 /// Commands for the recorder thread. Recorder calls can block for seconds, so they never run on
@@ -241,6 +321,8 @@ struct Active {
     pump: Pump,
     app_name: Option<String>,
     model_id: String,
+    /// Command Mode: the speech is an instruction for the AI.
+    command: bool,
 }
 
 #[derive(Clone)]
@@ -248,6 +330,7 @@ struct Meta {
     app_name: Option<String>,
     model_id: String,
     duration_ms: u64,
+    command: bool,
 }
 
 /// An utterance between key-up and insertion; kept in utterance order.
@@ -303,6 +386,7 @@ struct ControllerDeps2 {
     app_name: Arc<dyn Fn() -> Option<String> + Send + Sync>,
     mic_denied: Arc<dyn Fn() -> bool + Send + Sync>,
     on_no_model: Arc<dyn Fn() + Send + Sync>,
+    ai: Arc<dyn TextAi>,
 }
 
 fn spawn_pump(
@@ -351,6 +435,7 @@ impl Controller {
             app_name,
             mic_denied,
             on_no_model,
+            ai,
         } = deps;
 
         let hk_tx = tx.clone();
@@ -388,6 +473,7 @@ impl Controller {
                 app_name,
                 mic_denied,
                 on_no_model,
+                ai,
             },
             tx: tx.clone(),
             state: State::Idle,
@@ -444,6 +530,7 @@ impl Controller {
 
     fn handle_msg(&mut self, msg: Msg) {
         match msg {
+            Msg::Hotkey(HotkeyEvent::Command) if !self.paused => self.enter_command_mode(),
             Msg::Hotkey(ev) if !self.paused => {
                 let starts = matches!(ev, HotkeyEvent::Pressed | HotkeyEvent::DoubleTap)
                     && !matches!(self.state, State::Recording { .. });
@@ -505,7 +592,10 @@ impl Controller {
                 self.run(Input::Failed(msg));
                 self.pump_queue();
             }
-            Msg::InsertDone(Ok(out)) => {
+            Msg::InsertDone(Ok(Inserted { out, notice })) => {
+                if let Some(msg) = notice {
+                    self.toast("warning", msg);
+                }
                 let outcome = match out {
                     Some((text, outcome)) => {
                         if let Some(job) = self.inserting.as_mut() {
@@ -595,8 +685,31 @@ impl Controller {
         }
     }
 
+    /// The Command Mode chord is held: the recording in progress becomes an instruction.
+    fn enter_command_mode(&mut self) {
+        if self.active.as_ref().is_none_or(|a| a.command) {
+            return;
+        }
+        if let Err(msg) = self.d.ai.command_ready() {
+            self.toast("error", &msg);
+            self.run(Input::Hotkey(HotkeyEvent::Cancel));
+            return;
+        }
+        if let Some(a) = self.active.as_mut() {
+            a.command = true;
+        }
+        self.emit_state();
+    }
+
     fn emit_state(&mut self) {
-        let v = serde_json::to_value(&self.state).unwrap_or(Value::Null);
+        let mut v = serde_json::to_value(&self.state).unwrap_or(Value::Null);
+        let command = match self.state {
+            State::Recording { .. } => self.active.as_ref().is_some_and(|a| a.command),
+            _ => false,
+        };
+        if command && let Some(m) = v.as_object_mut() {
+            m.insert("command".into(), json!(true));
+        }
         if self.last_emitted.as_ref() != Some(&v) {
             self.last_emitted = Some(v.clone());
             (self.d.emit)(events::STATE, v);
@@ -637,6 +750,7 @@ impl Controller {
             pump,
             app_name,
             model_id,
+            command: false,
         });
         let _ = self.rec_tx.send(RecCmd::Start { id, frame_tx });
     }
@@ -653,6 +767,7 @@ impl Controller {
             app_name: active.app_name,
             model_id: active.model_id,
             duration_ms: 0,
+            command: active.command,
         };
         self.slots.push_back(Slot {
             seq,
@@ -713,6 +828,7 @@ impl Controller {
         let Some(meta) = self.cur_meta.take() else {
             return;
         };
+        let (app, command) = (meta.app_name.clone(), meta.command);
         self.inserting = Some(Job {
             raw: raw.clone(),
             meta,
@@ -720,24 +836,41 @@ impl Controller {
         });
         let inserter = self.d.inserter.clone();
         let store = self.d.store.clone();
+        let ai = self.d.ai.clone();
         let tx = self.tx.clone();
         tokio::spawn(async move {
-            // Blocking: reads the dictionary and the insert sleeps for the clipboard restore.
+            // Blocking: store reads, AI calls and the insert's clipboard restore delay.
             let done = tokio::task::spawn_blocking(move || {
+                if command {
+                    return run_command(&raw, inserter.as_ref(), ai.as_ref());
+                }
                 let dict = store.dictionary_list().unwrap_or_else(|e| {
                     tracing::warn!("could not read the dictionary, inserting without it: {e:#}");
                     Vec::new()
                 });
-                let text = postprocess(&raw, &dict, inserter.context());
-                (!text.is_empty()).then(|| {
+                let snippets = store.snippet_list().unwrap_or_else(|e| {
+                    tracing::warn!("could not read the snippets, inserting without them: {e:#}");
+                    Vec::new()
+                });
+                let style = ai.style_for(app.as_deref());
+                let (text, notice) = refine(
+                    &raw,
+                    &dict,
+                    &snippets,
+                    inserter.context(),
+                    style,
+                    ai.as_ref(),
+                );
+                let out = (!text.trim().is_empty()).then(|| {
                     let outcome = inserter.insert(&text);
                     (text, outcome)
-                })
+                });
+                Ok(Inserted { out, notice })
             })
             .await
-            .map_err(|e| {
+            .unwrap_or_else(|e| {
                 tracing::error!("insert task failed: {e}");
-                "Inserting the text failed unexpectedly.".to_string()
+                Err("Inserting the text failed unexpectedly.".to_string())
             });
             let _ = tx.send(Msg::InsertDone(done));
         });

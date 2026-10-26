@@ -7,13 +7,16 @@ import Logo from './ui/Logo';
 // Part 3 adds a "Home" dashboard entry above History; until then History is the landing page.
 const NAV: { label: string; route: string; icon: IconName }[] = [
   { label: 'History', route: '/history', icon: 'history' },
+  { label: 'Snippets', route: '/snippets', icon: 'snippet' },
+  { label: 'Style', route: '/style', icon: 'style' },
+  { label: 'AI', route: '/ai', icon: 'sparkle' },
   { label: 'Models', route: '/models', icon: 'models' },
   { label: 'Settings', route: '/settings', icon: 'settings' },
 ];
 
 function statusText(s: DictationState): string {
   switch (s.kind) {
-    case 'recording': return 'Listening';
+    case 'recording': return s.command ? 'Command' : 'Listening';
     case 'transcribing': return 'Transcribing';
     case 'inserting': return 'Transcribing';
     case 'error': return 'Error';

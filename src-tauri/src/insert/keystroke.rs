@@ -6,6 +6,10 @@ use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
 pub trait Keystroke {
     fn paste(&self) -> Result<()>;
+    /// Synthetic copy (Cmd+C / Ctrl+C), used by Command Mode to read the selection.
+    fn copy(&self) -> Result<()> {
+        Err(anyhow!("copy is not supported"))
+    }
 }
 
 /// Synthetic paste via enigo: Cmd+V on macOS, Ctrl+V elsewhere. An `Enigo`
@@ -17,8 +21,8 @@ const MODIFIER: Key = Key::Meta;
 #[cfg(not(target_os = "macos"))]
 const MODIFIER: Key = Key::Control;
 
-impl Keystroke for EnigoKeystroke {
-    fn paste(&self) -> Result<()> {
+impl EnigoKeystroke {
+    fn chord(&self, key: char) -> Result<()> {
         // uttr shows its own permission banner; enigo must not open the system dialog on
         // every paste.
         let settings = Settings {
@@ -29,12 +33,21 @@ impl Keystroke for EnigoKeystroke {
         enigo
             .key(MODIFIER, Direction::Press)
             .map_err(|e| anyhow!("modifier press: {e}"))?;
-        let clicked = enigo.key(Key::Unicode('v'), Direction::Click);
-        // Always release the modifier, even if the V click failed.
+        let clicked = enigo.key(Key::Unicode(key), Direction::Click);
+        // Always release the modifier, even if the key click failed.
         let released = enigo.key(MODIFIER, Direction::Release);
-        clicked.map_err(|e| anyhow!("v click: {e}"))?;
+        clicked.map_err(|e| anyhow!("{key} click: {e}"))?;
         released.map_err(|e| anyhow!("modifier release: {e}"))?;
         Ok(())
+    }
+}
+
+impl Keystroke for EnigoKeystroke {
+    fn paste(&self) -> Result<()> {
+        self.chord('v')
+    }
+    fn copy(&self) -> Result<()> {
+        self.chord('c')
     }
 }
 
@@ -65,15 +78,24 @@ impl<K: Keystroke + Send + Sync + 'static> MainThreadKeystroke<K> {
     }
 }
 
-impl<K: Keystroke + Send + Sync + 'static> Keystroke for MainThreadKeystroke<K> {
-    fn paste(&self) -> Result<()> {
+impl<K: Keystroke + Send + Sync + 'static> MainThreadKeystroke<K> {
+    fn on_main(&self, f: fn(&K) -> Result<()>) -> Result<()> {
         let (tx, rx) = mpsc::channel();
         let inner = self.inner.clone();
         (self.runner)(Box::new(move || {
-            let _ = tx.send(inner.paste());
+            let _ = tx.send(f(&inner));
         }));
         rx.recv_timeout(MAIN_THREAD_TIMEOUT)
-            .map_err(|_| anyhow!("the paste did not run on the main thread"))?
+            .map_err(|_| anyhow!("the keystroke did not run on the main thread"))?
+    }
+}
+
+impl<K: Keystroke + Send + Sync + 'static> Keystroke for MainThreadKeystroke<K> {
+    fn paste(&self) -> Result<()> {
+        self.on_main(K::paste)
+    }
+    fn copy(&self) -> Result<()> {
+        self.on_main(K::copy)
     }
 }
 

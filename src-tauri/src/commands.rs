@@ -15,11 +15,13 @@ use crate::app_state::{
 };
 use crate::events;
 use crate::hotkey::{HotkeyError, HotkeyEvent, HotkeyService, retry_hotkey_start};
+use crate::llm::{AiProvider, TextAi};
+use crate::models::Manager;
 use crate::models::catalog::{Catalog, CatalogEntry};
 use crate::models::hardware::Hardware;
 use crate::models::hf::{HfRepoSummary, Inspection};
 use crate::permissions::{self, PermKind, PermissionsStatus};
-use crate::store::{DictEntry, Transcript};
+use crate::store::{DictEntry, Snippet, Transcript};
 
 const HISTORY_PAGE_SIZE: u32 = 50;
 const KEYRING_SERVICE: &str = "uttr";
@@ -35,6 +37,23 @@ pub fn stored_hf_token() -> Option<String> {
         .get_password()
         .ok()
         .filter(|t| !t.is_empty())
+}
+
+pub fn stored_ai_key(p: AiProvider) -> Option<String> {
+    keyring::Entry::new(KEYRING_SERVICE, crate::llm::keyring_user(p)?)
+        .ok()?
+        .get_password()
+        .ok()
+        .filter(|t| !t.is_empty())
+}
+
+/// The manager that owns model `id`: speech models, or on-device AI models.
+fn manager_for<'a>(st: &'a AppState, id: &str) -> &'a Manager {
+    if st.llm_models.knows(id) {
+        &st.llm_models
+    } else {
+        &st.models
+    }
 }
 
 /// Pause/resume dictation and keep the tray item's label in sync.
@@ -130,6 +149,12 @@ pub fn spawn_hotkey_start(
                 if let Some(b) = binding_to_reapply(&requested, &settings) {
                     svc.set_binding(b);
                 }
+                let command = settings
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .command_hotkey
+                    .clone();
+                svc.set_command_binding(Some(command));
                 *g = Some(svc);
             } else {
                 tracing::warn!("hotkey service not started");
@@ -191,11 +216,17 @@ pub fn apply_settings(app: &AppHandle, st: &AppState, new: Settings) -> Result<(
             restart_hotkey(app, st);
         }
     }
+    if new.command_hotkey != old.command_hotkey
+        && let Some(h) = st.hotkey.lock().unwrap_or_else(|p| p.into_inner()).as_ref()
+    {
+        h.set_command_binding(Some(new.command_hotkey.clone()));
+    }
     if new.mic != old.mic {
         st.recorder.set_mic(new.mic.clone());
     }
     if new.idle_unload_min != old.idle_unload_min {
         st.stt.set_idle_unload(new.idle_unload());
+        st.local_llm.set_idle_unload(new.idle_unload());
     }
     if new.show_flowbar != old.show_flowbar {
         set_flowbar_visible(app, new.show_flowbar);
@@ -306,28 +337,33 @@ pub fn model_install(
         (None, Some(id)) => Catalog::bundled()
             .get(&id)
             .cloned()
+            .or_else(|| Catalog::llm_bundled().get(&id).cloned())
             .ok_or_else(|| format!("unknown model {id}"))?,
         (None, None) => return Err("Choose a model to install.".into()),
     };
     crate::models::validate_entry(&entry).map_err(err)?;
-    st.models.install(entry);
+    if entry.engine == crate::models::catalog::EngineKind::Llm {
+        st.llm_models.install(entry);
+    } else {
+        st.models.install(entry);
+    }
     Ok(())
 }
 
 #[tauri::command]
 pub async fn model_pause(st: State<'_, AppState>, id: String) -> Result<(), String> {
-    st.models.pause(&id).await;
+    manager_for(&st, &id).pause(&id).await;
     Ok(())
 }
 
 #[tauri::command]
 pub fn model_resume(st: State<'_, AppState>, id: String) {
-    st.models.resume(&id);
+    manager_for(&st, &id).resume(&id);
 }
 
 #[tauri::command]
 pub async fn model_cancel(st: State<'_, AppState>, id: String) -> Result<(), String> {
-    st.models.cancel(&id).await;
+    manager_for(&st, &id).cancel(&id).await;
     Ok(())
 }
 
@@ -337,6 +373,10 @@ pub async fn model_delete(
     st: State<'_, AppState>,
     id: String,
 ) -> Result<(), String> {
+    if st.llm_models.knows(&id) {
+        st.local_llm.unload();
+        return st.llm_models.delete(&id).await.map_err(err);
+    }
     let r = st.models.delete(&id).await.map_err(err);
     crate::tray::refresh_models_menu(&app);
     r
@@ -344,6 +384,9 @@ pub async fn model_delete(
 
 #[tauri::command]
 pub fn model_set_active(app: AppHandle, st: State<'_, AppState>, id: String) -> Result<(), String> {
+    if st.llm_models.knows(&id) {
+        return st.llm_models.set_active(&id).map_err(err);
+    }
     let r = st.models.set_active(&id).map_err(err);
     crate::tray::refresh_models_menu(&app);
     r
@@ -435,4 +478,140 @@ pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
     let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     crate::logging::reveal(&dir)
+}
+
+// ---- AI ------------------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn llm_catalog() -> Vec<CatalogEntry> {
+    Catalog::llm_bundled().entries().to_vec()
+}
+
+#[tauri::command(async)]
+pub fn llm_installed(st: State<'_, AppState>) -> Vec<InstalledModelDto> {
+    let active = st.llm_models.ensure_active().map(|m| m.entry.id);
+    st.llm_models
+        .installed()
+        .into_iter()
+        .map(|m| InstalledModelDto {
+            disk_bytes: st.llm_models.disk_usage(&m.entry.id),
+            active: active.as_deref() == Some(m.entry.id.as_str()),
+            entry: m.entry,
+        })
+        .collect()
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiKeysStatus {
+    open_ai: bool,
+    anthropic: bool,
+}
+
+/// Which API keys are stored (never the keys themselves).
+#[tauri::command]
+pub fn ai_keys_status(st: State<'_, AppState>) -> AiKeysStatus {
+    AiKeysStatus {
+        open_ai: st.ai_keys.get(AiProvider::OpenAi).is_some(),
+        anthropic: st.ai_keys.get(AiProvider::Anthropic).is_some(),
+    }
+}
+
+/// `None` removes the key. Runs off the main thread: keychain access can block on a prompt.
+#[tauri::command(async)]
+pub fn ai_key_set(
+    st: State<'_, AppState>,
+    provider: AiProvider,
+    key: Option<String>,
+) -> Result<(), String> {
+    let user = crate::llm::keyring_user(provider).ok_or("This provider takes no API key.")?;
+    let entry = keyring::Entry::new(KEYRING_SERVICE, user).map_err(err)?;
+    let key = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
+    match &key {
+        Some(k) => entry.set_password(k).map_err(err)?,
+        None => match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(err(e)),
+        },
+    }
+    st.ai_keys.set(provider, key);
+    Ok(())
+}
+
+/// Runs `text` through the current AI settings, as a dictation (`command == false`: cleanup
+/// in the default style) or as a Command Mode instruction with no selection. For the AI page's
+/// "Try it" box.
+#[tauri::command]
+pub async fn ai_try(
+    st: State<'_, AppState>,
+    text: String,
+    command: bool,
+) -> Result<String, String> {
+    let ai = st.ai.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        if command {
+            ai.command(&text, None)
+        } else {
+            let style = ai.style_for(None);
+            match ai.clean(&text, style, &[])? {
+                Some(t) => Ok(t),
+                None => Err("AI is off, or the text is too short to clean up.".into()),
+            }
+        }
+    })
+    .await
+    .map_err(err)?
+}
+
+// ---- snippets / styles ---------------------------------------------------------------------
+
+fn check_snippet(trigger: &str, expansion: &str) -> Result<(), String> {
+    if !trigger.chars().any(char::is_alphanumeric) {
+        return Err("Enter the words you will say.".into());
+    }
+    if expansion.trim().is_empty() {
+        return Err("Enter the text to insert.".into());
+    }
+    Ok(())
+}
+
+#[tauri::command(async)]
+pub fn snippet_list(st: State<'_, AppState>) -> Result<Vec<Snippet>, String> {
+    st.store.snippet_list().map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn snippet_add(
+    st: State<'_, AppState>,
+    trigger: String,
+    expansion: String,
+) -> Result<i64, String> {
+    check_snippet(&trigger, &expansion)?;
+    st.store
+        .snippet_add(trigger.trim(), &expansion)
+        .map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn snippet_update(
+    st: State<'_, AppState>,
+    id: i64,
+    trigger: String,
+    expansion: String,
+) -> Result<(), String> {
+    check_snippet(&trigger, &expansion)?;
+    st.store
+        .snippet_update(id, trigger.trim(), &expansion)
+        .map_err(err)
+}
+
+#[tauri::command(async)]
+pub fn snippet_delete(st: State<'_, AppState>, id: i64) -> Result<(), String> {
+    st.store.snippet_delete(id).map_err(err)
+}
+
+/// Apps recently dictated into, for the Style page's suggestions.
+#[tauri::command(async)]
+pub fn recent_apps(st: State<'_, AppState>) -> Result<Vec<String>, String> {
+    st.store.recent_apps(20).map_err(err)
 }

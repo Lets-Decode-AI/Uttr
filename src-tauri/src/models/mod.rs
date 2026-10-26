@@ -17,6 +17,10 @@ pub use download::{DlStatus, DownloadError, Progress};
 use hf::HfClient;
 
 const ACTIVE_KEY: &str = "active_model";
+/// Settings key of the active on-device AI model.
+pub const ACTIVE_LLM_KEY: &str = "active_llm";
+/// Recommended on-device AI model.
+pub const DEFAULT_LLM: &str = "qwen2.5-1.5b-instruct";
 const MANIFEST: &str = "manifest.json";
 const PENDING: &str = "pending.json";
 const MAX_RETRIES: u32 = 3;
@@ -73,6 +77,8 @@ pub struct Manager {
     retry_base: Duration,
     running: Arc<Mutex<HashMap<String, Running>>>,
     next_gen: Arc<std::sync::atomic::AtomicU64>,
+    /// Settings key holding the active model's id.
+    active_key: &'static str,
 }
 
 fn dir_name(id: &str) -> String {
@@ -158,7 +164,19 @@ impl Manager {
             retry_base: Duration::from_millis(500),
             running: Arc::default(),
             next_gen: Arc::default(),
+            active_key: ACTIVE_KEY,
         }
+    }
+
+    /// Keep the active model under another settings key (the AI models' manager).
+    pub fn with_active_key(mut self, key: &'static str) -> Self {
+        self.active_key = key;
+        self
+    }
+
+    /// Whether `id` belongs to this manager: in its catalog, or present under its root.
+    pub fn knows(&self, id: &str) -> bool {
+        self.catalog.get(id).is_some() || (validate_id(id).is_ok() && self.model_dir(id).exists())
     }
 
     /// Replace the free-space probe (tests).
@@ -272,8 +290,13 @@ impl Manager {
         if dir.exists() {
             std::fs::remove_dir_all(&dir)?;
         }
-        if self.store.get_setting::<String>(ACTIVE_KEY)?.as_deref() == Some(id) {
-            self.store.delete_setting(ACTIVE_KEY)?;
+        if self
+            .store
+            .get_setting::<String>(self.active_key)?
+            .as_deref()
+            == Some(id)
+        {
+            self.store.delete_setting(self.active_key)?;
             // Fall back to another installed model, if any.
             self.ensure_active();
         }
@@ -298,7 +321,7 @@ impl Manager {
     pub fn active(&self) -> Option<InstalledModel> {
         let id = self
             .store
-            .get_setting::<String>(ACTIVE_KEY)
+            .get_setting::<String>(self.active_key)
             .ok()
             .flatten()?;
         self.installed().into_iter().find(|m| m.entry.id == id)
@@ -308,12 +331,16 @@ impl Manager {
     /// points at a model that is no longer installed. `None` only when nothing is installed.
     pub fn ensure_active(&self) -> Option<InstalledModel> {
         let installed = self.installed();
-        let id = self.store.get_setting::<String>(ACTIVE_KEY).ok().flatten();
+        let id = self
+            .store
+            .get_setting::<String>(self.active_key)
+            .ok()
+            .flatten();
         if let Some(m) = id.and_then(|id| installed.iter().find(|m| m.entry.id == id)) {
             return Some(m.clone());
         }
         let first = installed.into_iter().next()?;
-        if let Err(e) = self.store.set_setting(ACTIVE_KEY, &first.entry.id) {
+        if let Err(e) = self.store.set_setting(self.active_key, &first.entry.id) {
             tracing::warn!("could not persist the active model: {e:#}");
         }
         Some(first)
@@ -324,7 +351,7 @@ impl Manager {
         if !self.installed().iter().any(|m| m.entry.id == id) {
             return Err(anyhow!("That model is not installed."));
         }
-        self.store.set_setting(ACTIVE_KEY, &id.to_string())
+        self.store.set_setting(self.active_key, &id.to_string())
     }
 
     pub fn disk_usage(&self, id: &str) -> u64 {

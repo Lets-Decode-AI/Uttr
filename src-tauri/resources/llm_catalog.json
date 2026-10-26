@@ -1,0 +1,61 @@
+{
+  "models": [
+    {
+      "id": "qwen2.5-1.5b-instruct",
+      "name": "Qwen2.5 1.5B Instruct (Q4_K_M)",
+      "hf_repo": "Qwen/Qwen2.5-1.5B-Instruct-GGUF",
+      "revision": "91cad51170dc346986eccefdc2dd33a9da36ead9",
+      "files": [
+        {
+          "path": "qwen2.5-1.5b-instruct-q4_k_m.gguf",
+          "size": 1117320736,
+          "sha256": "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
+        }
+      ],
+      "engine": "llm",
+      "languages": [
+        "multi"
+      ],
+      "min_ram_gb": 4,
+      "notes": "Recommended. Small and fast, good for cleanup."
+    },
+    {
+      "id": "llama-3.2-3b-instruct",
+      "name": "Llama 3.2 3B Instruct (Q4_K_M)",
+      "hf_repo": "bartowski/Llama-3.2-3B-Instruct-GGUF",
+      "revision": "5ab33fa94d1d04e903623ae72c95d1696f09f9e8",
+      "files": [
+        {
+          "path": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+          "size": 2019377696,
+          "sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff"
+        }
+      ],
+      "engine": "llm",
+      "languages": [
+        "multi"
+      ],
+      "min_ram_gb": 8,
+      "notes": "Better rewrites for Command Mode. Llama 3.2 Community License."
+    },
+    {
+      "id": "qwen3-4b-instruct-2507",
+      "name": "Qwen3 4B Instruct 2507 (Q4_K_M)",
+      "hf_repo": "unsloth/Qwen3-4B-Instruct-2507-GGUF",
+      "revision": "a06e946bb6b655725eafa393f4a9745d460374c9",
+      "files": [
+        {
+          "path": "Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+          "size": 2497281120,
+          "sha256": "3605803b982cb64aead44f6c1b2ae36e3acdb41d8e46c8a94c6533bc4c67e597"
+        }
+      ],
+      "engine": "llm",
+      "languages": [
+        "multi"
+      ],
+      "min_ram_gb": 8,
+      "notes": "Best quality. Slower on computers without a GPU."
+    }
+  ]
+}

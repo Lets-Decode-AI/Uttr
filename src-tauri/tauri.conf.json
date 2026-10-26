@@ -55,7 +55,8 @@
     "macOS": {
       "infoPlist": "Info.plist",
       "signingIdentity": "-",
-      "entitlements": "Entitlements.plist"
+      "entitlements": "Entitlements.plist",
+      "minimumSystemVersion": "10.15"
     },
     "publisher": "Lets Decode AI",
     "copyright": "Copyright (c) 2026 Lets Decode AI",

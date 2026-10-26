@@ -31,6 +31,17 @@ For each of **TextEdit, a Safari textarea, VS Code and Slack**:
 - [ ] A personal dictionary replacement is applied.
 - [ ] With no model installed, or with Accessibility revoked, using the shortcut shows a clear Flow Bar message.
 
+## 3b. Text intelligence (Part 2)
+
+- [ ] AI page, On this computer: download Qwen2.5 1.5B, then "Try it" > Clean up turns the sample into one clean sentence with "Wednesday".
+- [ ] With on-device AI on, dictate "um so lets meet at two no three" into Notes: the inserted text keeps only "three" and has no "um".
+- [ ] With an Anthropic or OpenAI key saved, the same dictation is cleaned up; a wrong key makes the Flow Bar say "AI cleanup didn't work" and the plain transcript is inserted.
+- [ ] Command Mode: select a sentence in TextEdit, hold `Fn+Ctrl` (`Ctrl+Win+Alt` on Windows), say "make this more formal". The Flow Bar shows Command and the selection is replaced. Your clipboard is unchanged afterwards.
+- [ ] Command Mode with nothing selected writes new text at the cursor ("write a two-line haiku about tea").
+- [ ] Command Mode with AI off shows "Command Mode needs AI" and records nothing.
+- [ ] Snippets: add "my email" and say "my email." on its own: the address is inserted exactly. Inside a sentence it is expanded too.
+- [ ] Style: add Slack as Very casual, dictate "Sounds good." into Slack: "sounds good" is inserted. Mail with Formal keeps "Sounds good."
+
 ## 4. Performance
 
 - [ ] A 5 s utterance is inserted in under 500 ms after key-up on Apple Silicon. Check the timing in the logs, or use the numbers from the ignored integration test.
