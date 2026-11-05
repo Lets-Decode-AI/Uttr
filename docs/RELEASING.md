@@ -17,12 +17,12 @@ auto-generated release notes attached. A maintainer reviews the draft and publis
 
 | Target | Runner | Bundles |
 |---|---|---|
-| `aarch64-apple-darwin` | `macos-14` | `.dmg` |
+| `aarch64-apple-darwin` | `macos-15` | `.dmg` |
 | `x86_64-apple-darwin` | `macos-15-intel` | `.dmg` |
 | `x86_64-pc-windows-msvc` | `windows-latest` | NSIS `-setup.exe` |
 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | `.AppImage`, `.deb` |
 
-GitHub retired `macos-13`, so the Intel build uses `macos-15-intel`.
+GitHub retired `macos-13` and is retiring `macos-14`, so the builds use `macos-15` (Apple Silicon) and `macos-15-intel`.
 
 ## Code signing secrets (all optional)
 
