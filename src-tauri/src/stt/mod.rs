@@ -1,6 +1,7 @@
 //! Speech-to-text: engine abstraction, worker thread, streaming chunked sessions.
 
 pub mod chunker;
+pub mod cloud;
 pub mod session;
 pub mod sherpa;
 pub mod worker;

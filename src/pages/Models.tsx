@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, type CatalogEntry, type DownloadProgress, type HfRepoSummary, type Inspection, type InstalledModelDto } from '../ipc';
 import ModelRow from '../components/ModelRow';
+import SpeechSource from '../components/SpeechSource';
 import Button from '../components/ui/Button';
 import Group from '../components/ui/Group';
 import Icon from '../components/ui/Icon';
@@ -27,6 +28,7 @@ export default function Models() {
   const [catalog, setCatalog] = useState<CatalogEntry[]>([]);
   const [installed, setInstalled] = useState<InstalledModelDto[]>([]);
   const [progress, setProgress] = useState<Record<string, DownloadProgress>>({});
+  const [source, setSource] = useState<'local' | 'cloud'>('local');
 
   const refresh = useCallback(async () => {
     try {
@@ -82,8 +84,10 @@ export default function Models() {
     <div className="page">
       <header className="page-head page-head-row">
         <h1>Models</h1>
-        <Segmented options={TABS} value={tab} onChange={setTab} />
+        {source === 'local' && <Segmented options={TABS} value={tab} onChange={setTab} />}
       </header>
+      <SpeechSource onChange={setSource} />
+      {source === 'local' && <>
 
       {tab === 'installed' && (
         <>
@@ -117,6 +121,7 @@ export default function Models() {
       )}
 
       {tab === 'hf' && <HfSearch progress={progress} installedIds={installedIds} onInstalled={refresh} />}
+      </>}
     </div>
   );
 }

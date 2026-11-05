@@ -67,6 +67,8 @@ pub enum Input {
     RecorderFailed(RecorderError),
     /// There is no active speech model, so recording cannot start.
     NoModel,
+    /// A speech model is configured but cannot run; the message says why (a missing API key).
+    NotReady(String),
     /// The OS denies microphone access, so recording cannot start.
     MicDenied,
     /// The oldest in-flight utterance finished transcribing (results arrive in utterance order).
@@ -219,6 +221,12 @@ pub fn step(state: State, input: Input, now: Instant) -> (State, Vec<Effect>) {
             ),
             vec![],
         ),
+        (State::Recording { .. }, Input::NotReady(msg)) => finish(
+            &old,
+            error(msg, now),
+            vec![Effect::CancelRecording, Effect::ArmEsc(false)],
+        ),
+        (_, Input::NotReady(msg)) => finish(&old, error(msg, now), vec![]),
 
         (State::Recording { .. }, Input::MicDenied) => finish(
             &old,

@@ -37,7 +37,7 @@ const tick = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync
 const setPlatform = (v: string) => Object.defineProperty(window.navigator, 'platform', { value: v, configurable: true });
 const next = async () => { fireEvent.click(screen.getByRole('button', { name: /^continue$/i })); await flush(); };
 const toStep = async (n: number) => { for (let i = 1; i < n; i++) await next(); };
-const stepLabel = () => screen.getByRole('group', { name: /^Step \d of 5/ }).getAttribute('aria-label');
+const stepLabel = () => screen.getByRole('group', { name: /^Step \d of 7/ }).getAttribute('aria-label');
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -60,26 +60,26 @@ afterEach(() => {
 });
 
 describe('Onboarding flow', () => {
-  it('onboarding_has_five_steps_and_back_navigation', async () => {
+  it('onboarding_has_seven_steps_and_back_navigation', async () => {
     a.installed.mockResolvedValue([{ ...entry('m1', 'Parakeet Small'), diskBytes: 1, active: false }]);
     render(<Onboarding />);
     await flush();
-    expect(stepLabel()).toMatch(/Step 1 of 5/);
+    expect(stepLabel()).toMatch(/Step 1 of 7/);
     expect(screen.queryByRole('button', { name: /^back$/i })).toBeNull();
     await next();
-    expect(stepLabel()).toMatch(/Step 2 of 5/);
+    expect(stepLabel()).toMatch(/Step 2 of 7/);
     await next();
-    expect(stepLabel()).toMatch(/Step 3 of 5/);
+    expect(stepLabel()).toMatch(/Step 3 of 7/);
     await next();
-    expect(stepLabel()).toMatch(/Step 4 of 5/);
+    expect(stepLabel()).toMatch(/Step 4 of 7/);
     await next();
-    expect(stepLabel()).toMatch(/Step 5 of 5/);
+    expect(stepLabel()).toMatch(/Step 5 of 7/);
     fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
     await flush();
-    expect(stepLabel()).toMatch(/Step 4 of 5/);
+    expect(stepLabel()).toMatch(/Step 4 of 7/);
     fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
     await flush();
-    expect(stepLabel()).toMatch(/Step 3 of 5/);
+    expect(stepLabel()).toMatch(/Step 3 of 7/);
   });
 
   it('welcome_says_this_mac_on_macos_and_this_computer_elsewhere', async () => {
@@ -92,6 +92,13 @@ describe('Onboarding flow', () => {
     render(<Onboarding />);
     await flush();
     expect(screen.getByText('Dictate into any app. Speech is turned into text on this computer and never leaves it.')).toBeTruthy();
+  });
+
+  it('welcome_lists_what_uttr_does', async () => {
+    render(<Onboarding />);
+    await flush();
+    const list = screen.getByRole('list', { name: 'What uttr does' });
+    expect(list.querySelectorAll('li').length).toBe(3);
   });
 });
 
@@ -162,7 +169,7 @@ describe('Permissions step', () => {
     expect((screen.getByRole('button', { name: /^continue$/i }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: /continue without/i }));
     await flush();
-    expect(stepLabel()).toMatch(/Step 4 of 5/);
+    expect(stepLabel()).toMatch(/Step 4 of 7/);
   });
 
   it('no_allow_button_flashes_before_the_first_poll', async () => {
@@ -293,7 +300,7 @@ describe('Model step', () => {
     expect(screen.getByText('Ready')).toBeTruthy();
     await next();
     expect(a.modelSetActive).toHaveBeenCalledWith('m1');
-    expect(stepLabel()).toMatch(/Step 5 of 5/);
+    expect(stepLabel()).toMatch(/Step 5 of 7/);
   });
 });
 
@@ -302,7 +309,7 @@ describe('Try it step', () => {
     a.installed.mockResolvedValue([{ ...entry('m1', 'Parakeet Small'), diskBytes: 1, active: false }]);
     render(<Onboarding />);
     await flush();
-    await toStep(5);
+    await toStep(6);
   };
 
   it('try_it_mirrors_dictation_state', async () => {
@@ -343,7 +350,72 @@ describe('Try it step', () => {
     expect(screen.getByText('Hello from uttr')).toBeTruthy();
     expect(screen.getByText('3 words · 90 WPM')).toBeTruthy();
     expect(a.settingsSet).toHaveBeenCalledWith({ ...settings, onboarded: true });
+    await next();
+    expect(screen.getByRole('heading', { name: "You're all set" })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /start using uttr/i }));
-    expect(window.location.hash).toBe('#/history');
+    await flush();
+    expect(window.location.hash).toBe('#/home');
+  });
+
+  it('try_it_can_be_skipped', async () => {
+    await toTryIt();
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }));
+    await flush();
+    expect(stepLabel()).toMatch(/Step 7 of 7/);
+  });
+});
+
+describe('How it works step', () => {
+  it('how_it_works_shows_the_three_moves', async () => {
+    a.installed.mockResolvedValue([{ ...entry('m1', 'Parakeet Small'), diskBytes: 1, active: false }]);
+    render(<Onboarding />);
+    await flush();
+    await toStep(5);
+    expect(screen.getByRole('heading', { name: 'How it works' })).toBeTruthy();
+    const demo = screen.getByRole('img', { name: /hold the shortcut, speak, and let go/i });
+    expect(demo).toBeTruthy();
+    expect(screen.getByText(/click into any text box/i)).toBeTruthy();
+    expect(screen.getByText(/double-press/i)).toBeTruthy();
+    expect(screen.getByText(/esc cancels/i)).toBeTruthy();
+  });
+});
+
+describe('All set step', () => {
+  const toAllSet = async () => {
+    a.installed.mockResolvedValue([{ ...entry('m1', 'Parakeet Small'), diskBytes: 1, active: true }]);
+    render(<Onboarding />);
+    await flush();
+    await toStep(6);
+    fireEvent.click(screen.getByRole('button', { name: 'Skip for now' }));
+    await flush();
+  };
+
+  it('all_set_summarizes_the_setup', async () => {
+    await toAllSet();
+    expect(screen.getByRole('heading', { name: "You're all set" })).toBeTruthy();
+    const summary = screen.getByRole('list', { name: 'Your setup' });
+    expect(summary.textContent).toMatch(/Shortcut/);
+    expect(summary.textContent).toMatch(/Parakeet Small/);
+    expect(summary.textContent).toMatch(/System default/);
+  });
+
+  it('all_set_change_links_go_back_to_their_step', async () => {
+    await toAllSet();
+    fireEvent.click(screen.getByRole('button', { name: 'Change shortcut' }));
+    await flush();
+    expect(stepLabel()).toMatch(/Step 2 of 7/);
+  });
+
+  it('all_set_finishes_and_starts_the_tour', async () => {
+    await toAllSet();
+    const seen = vi.fn();
+    window.addEventListener('uttr:tour', seen);
+    fireEvent.click(screen.getByRole('button', { name: 'Start the tour' }));
+    await flush();
+    expect(a.settingsSet).toHaveBeenCalledWith({ ...settings, onboarded: true });
+    expect(window.location.hash).toBe('#/home');
+    await tick(400);
+    expect(seen).toHaveBeenCalled();
+    window.removeEventListener('uttr:tour', seen);
   });
 });

@@ -6,6 +6,12 @@ use serde_json::{Value, json};
 use super::prompt::Prompt;
 
 pub const OPENAI_URL: &str = "https://api.openai.com/v1";
+pub const OPENROUTER_URL: &str = "https://openrouter.ai/api/v1";
+/// Sent to OpenRouter so requests are attributed to the app (its "app" leaderboard).
+pub const OPENROUTER_HEADERS: &[(&str, &str)] = &[
+    ("HTTP-Referer", "https://github.com/Lets-Decode-AI/Uttr"),
+    ("X-Title", "uttr"),
+];
 pub const ANTHROPIC_URL: &str = "https://api.anthropic.com";
 const ANTHROPIC_VERSION: &str = "2026-10-21";
 
@@ -50,6 +56,7 @@ pub async fn openai(
     key: Option<&str>,
     model: &str,
     p: &Prompt,
+    headers: &[(&str, &str)],
 ) -> Result<String, String> {
     let url = format!("{}/chat/completions", base.trim_end_matches('/'));
     // No token limit or temperature: reasoning models reject or misuse both.
@@ -61,6 +68,9 @@ pub async fn openai(
         ],
     });
     let mut req = http.post(url).json(&body);
+    for (name, value) in headers {
+        req = req.header(*name, *value);
+    }
     if let Some(k) = key {
         req = req.bearer_auth(k);
     }
@@ -114,6 +124,60 @@ pub async fn anthropic(
     Ok(text)
 }
 
+/// One model in OpenRouter's catalog, for the model picker.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouterModel {
+    pub id: String,
+    pub name: String,
+    pub context_length: u64,
+    /// US dollars per million input and output tokens; `None` when not listed.
+    pub input_per_m: Option<f64>,
+    pub output_per_m: Option<f64>,
+}
+
+/// OpenRouter's public model list (no key needed): text-output models only, sorted by name.
+pub async fn openrouter_models(
+    http: &reqwest::Client,
+    base: &str,
+) -> Result<Vec<RouterModel>, String> {
+    let url = format!("{}/models", base.trim_end_matches('/'));
+    let v = post(http.get(url)).await?;
+    let per_m = |m: &Value, k: &str| {
+        m.pointer(&format!("/pricing/{k}"))
+            .and_then(Value::as_str)
+            .and_then(|p| p.parse::<f64>().ok())
+            .map(|p| (p * 1_000_000.0 * 100.0).round() / 100.0)
+    };
+    let mut out: Vec<RouterModel> = v
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|m| {
+            m.pointer("/architecture/output_modalities")
+                .and_then(Value::as_array)
+                .is_none_or(|o| o.iter().any(|x| x == "text"))
+        })
+        .filter_map(|m| {
+            let id = m.get("id")?.as_str()?.to_string();
+            Some(RouterModel {
+                name: m
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(&id)
+                    .to_string(),
+                context_length: m.get("context_length").and_then(Value::as_u64).unwrap_or(0),
+                input_per_m: per_m(m, "prompt"),
+                output_per_m: per_m(m, "completion"),
+                id,
+            })
+        })
+        .collect();
+    out.sort_by_key(|m| m.name.to_lowercase());
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +214,7 @@ mod tests {
             Some("sk-test"),
             "m",
             &prompt(),
+            &[],
         )
         .await;
         assert_eq!(out.unwrap(), "Clean.");
@@ -166,8 +231,72 @@ mod tests {
             .mount(&server)
             .await;
         let base = format!("{}/v1/", server.uri());
-        let out = openai(&reqwest::Client::new(), &base, None, "llama3", &prompt()).await;
+        let out = openai(
+            &reqwest::Client::new(),
+            &base,
+            None,
+            "llama3",
+            &prompt(),
+            &[],
+        )
+        .await;
         assert_eq!(out.unwrap(), "ok");
+    }
+
+    #[tokio::test]
+    async fn openrouter_gets_attribution_headers() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/v1/chat/completions"))
+            .and(header("authorization", "Bearer or-key"))
+            .and(header("x-title", "uttr"))
+            .and(header(
+                "http-referer",
+                "https://github.com/Lets-Decode-AI/Uttr",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "choices": [{"message": {"content": "routed"}}]
+            })))
+            .mount(&server)
+            .await;
+        let base = format!("{}/api/v1", server.uri());
+        let out = openai(
+            &reqwest::Client::new(),
+            &base,
+            Some("or-key"),
+            "anthropic/claude-opus-5.5",
+            &prompt(),
+            OPENROUTER_HEADERS,
+        )
+        .await;
+        assert_eq!(out.unwrap(), "routed");
+    }
+
+    #[tokio::test]
+    async fn openrouter_model_list_keeps_text_models_with_prices() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/v1/models"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "data": [
+                {"id": "z/img", "name": "Zeta Image", "architecture": {"output_modalities": ["image"]}},
+                {"id": "b/chat", "name": "beta chat", "context_length": 8192,
+                 "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+                 "architecture": {"output_modalities": ["text"]}},
+                {"id": "a/free", "name": "Alpha", "pricing": {"prompt": "0", "completion": "0"}}
+            ]})))
+            .mount(&server)
+            .await;
+        let base = format!("{}/api/v1", server.uri());
+        let list = openrouter_models(&reqwest::Client::new(), &base)
+            .await
+            .unwrap();
+        let ids: Vec<&str> = list.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["a/free", "b/chat"]);
+        assert_eq!(
+            (list[1].input_per_m, list[1].output_per_m),
+            (Some(3.0), Some(15.0))
+        );
+        assert_eq!(list[1].context_length, 8192);
     }
 
     #[tokio::test]

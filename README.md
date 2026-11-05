@@ -19,13 +19,13 @@ It is a small [Tauri 2](https://tauri.app) app (Rust core, React UI) that lives 
 The installer includes everything the app needs, including the ONNX Runtime libraries. You download
 models from Hugging Face inside the app.
 
-> Status: Part 1 (core dictation and the local model manager) and Part 2 (text intelligence: AI cleanup,
-> Command Mode, snippets and per-app styles) are done. See the [Roadmap](#roadmap).
+> Status: every roadmap phase is done: core dictation and the model manager (Part 1), text intelligence
+> (Part 2), the Home dashboard (Part 3) and Wayland shortcuts. See the [Roadmap](#roadmap).
 
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/history-dark.png">
-    <img src="docs/images/history-light.png" alt="The uttr window showing the History page with recent dictations" width="760">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/home-dark.png">
+    <img src="docs/images/home-light.png" alt="The uttr Home page: words dictated, speed, streak, time saved and a 30-day chart" width="760">
   </picture>
 </p>
 
@@ -48,7 +48,12 @@ models from Hugging Face inside the app.
   such as "make this friendlier" or "translate to Spanish". With nothing selected, uttr writes new text at the cursor.
 - **Snippets**: say a short phrase such as "my calendar link" and uttr types the saved text.
 - **Styles per app**: formal, casual or very casual, chosen by the app you are dictating into (for example very casual in Slack, formal in Mail).
-- Searchable history of your dictations, stored in SQLite on your machine.
+- **Home dashboard**: words dictated, average speed, day streak, time saved against typing, a 30-day chart and your top apps.
+- Searchable history of your dictations, stored in SQLite on your machine. Filter by app, compare with the original
+  transcript, and choose how long history is kept.
+- **Bring your own key for speech** (optional): transcribe with OpenAI, Groq or any OpenAI-compatible server
+  instead of an on-device model.
+- A guided setup, an in-app tour of every page and tooltips that explain the technical settings.
 - Low resource use. uttr stays in the tray at rest, and the model unloads after an idle timeout (10 minutes by default, or never).
 - Optional Hugging Face token for gated or private repos, stored in the system keychain.
 - Open at login, microphone selection and a configurable shortcut.
@@ -59,18 +64,24 @@ models from Hugging Face inside the app.
 - The microphone stays open for up to 15 s after a dictation so the next one does not clip the first word. While it is open, only the latest 0.3 s of audio is held in memory.
   After 15 s it closes.
 - The only network traffic is model downloads and searches on Hugging Face, which you start yourself.
-- AI is off by default. On-device AI keeps your text on your computer. If you choose OpenAI or Anthropic, the
-  dictated **text** (never the audio) is sent to that provider, and your API key is stored in the system keychain.
+- AI is off by default. On-device AI keeps your text on your computer. If you choose OpenAI, Anthropic or OpenRouter,
+  the dictated **text** (never the audio) is sent to that provider, and your API key is stored in the system keychain.
+- Speech runs on your computer unless you switch to **Cloud (your key)** on the Models page. Then the **audio** of each
+  dictation is sent to the service you chose (OpenAI, Groq or your own server) and billed to your account.
 - Custom Hugging Face repos: files tracked with Git LFS are checked against their SHA-256. Other files
   (such as `tokens.txt`) are checked for size only, because Hugging Face publishes no hash for them.
 
 ## Screenshots
 
-| AI cleanup and Command Mode | Snippets |
+| AI cleanup with OpenRouter | Bring your own key for speech |
 |---|---|
-| ![The AI page: provider choice, on-device models and the Command Mode shortcut](docs/images/ai-light.png) | ![The Snippets page with an email address, a calendar link and a sign-off](docs/images/snippets-light.png) |
-| **Styles per app** | **Dark theme** |
-| ![The Style page with a default style and rules for Slack, Messages and Mail](docs/images/style-light.png) | ![The AI page in the dark theme](docs/images/ai-dark.png) |
+| ![The AI page with OpenRouter, a model picker with prices and the Command Mode shortcut](docs/images/ai-light.png) | ![The Models page with cloud speech through Groq](docs/images/byok-light.png) |
+| **History** | **Snippets** |
+| ![The History page with an app filter and the Show original switch](docs/images/history-light.png) | ![The Snippets page with an email address, a calendar link and a sign-off](docs/images/snippets-light.png) |
+| **Styles per app** | **Setup: How it works** |
+| ![The Style page with a default style and rules for Slack, Messages and Mail](docs/images/style-light.png) | ![The How it works step of setup, with an animated demo](docs/images/onboarding-light.png) |
+| **The tour** | **Dark theme** |
+| ![The in-app tour pointing at Home](docs/images/tour-light.png) | ![The AI page in the dark theme](docs/images/ai-dark.png) |
 
 The screenshots use sample data. To retake them after a UI change, see [scripts/screenshots](scripts/screenshots/README.md).
 
@@ -117,9 +128,10 @@ Run the installer. For unsigned builds, Windows SmartScreen may warn about an un
 ### Linux
 
 - **X11**: supported. The default shortcut is to hold `Ctrl+Super`.
-- **Wayland**: the global shortcut is not available yet, and the app shows "The global shortcut is not available on Wayland."
-  Use an X11 session for now. Where synthetic paste is blocked, the text stays on the clipboard and you paste it yourself.
-  Support through the XDG GlobalShortcuts portal is on the [Roadmap](#roadmap).
+- **Wayland**: shortcuts go through the XDG GlobalShortcuts portal (GNOME 48 or KDE Plasma 6 and later). The desktop
+  asks you to approve uttr's two shortcuts, Dictate and Command Mode, and you can change their keys in its settings.
+  Esc does not cancel a dictation there, because the portal cannot report it. Where synthetic paste is blocked, the
+  text stays on the clipboard and you paste it yourself.
 - Make the AppImage executable (`chmod +x uttr_*.AppImage`) or install the `.deb` with `sudo apt install ./uttr_*.deb`.
 
 ## Supported models
@@ -151,6 +163,7 @@ Choose a provider on the **AI** page:
 | On this computer | Nowhere | Download a model on the AI page; it runs with [llama.cpp](https://github.com/ggml-org/llama.cpp) (Metal on Apple Silicon) |
 | OpenAI | OpenAI, or the OpenAI-compatible server you set | API key (not needed for local servers such as Ollama), model name (default `gpt-5-mini`) |
 | Anthropic | Anthropic | API key, model name (default `claude-opus-5-5`) |
+| OpenRouter | OpenRouter, then the model's provider | API key; pick any of its models from a searchable list with prices (default `anthropic/claude-opus-5.5`) |
 
 On-device models ([`src-tauri/resources/llm_catalog.json`](src-tauri/resources/llm_catalog.json), pinned and SHA-256 verified):
 
@@ -171,6 +184,19 @@ How it fits together:
 Command Mode reads the selection with a synthetic copy (your clipboard is restored), sends your spoken instruction
 and the selection to the AI, and pastes the answer over the selection. The Flow Bar shows **Command** while you speak.
 You can also start a normal dictation and add the extra key to switch it to Command Mode.
+
+## Bring your own key for speech (BYOK)
+
+On the Models page, **Speech recognition** switches between models on this computer and **Cloud (your key)**:
+
+| Service | Server address | Default model |
+|---|---|---|
+| OpenAI | `https://api.openai.com/v1` | `whisper-1` |
+| Groq | `https://api.groq.com/openai/v1` | `whisper-large-v3-turbo` |
+| Other | any OpenAI-compatible `/audio/transcriptions` server, such as a self-hosted Whisper | your choice; a key is optional |
+
+uttr still cuts your speech at pauses and uploads each piece as 16 kHz WAV while you talk, so long dictations finish
+soon after you let go. If a key is missing, the shortcut says what to add instead of recording.
 
 ### Measured performance
 
@@ -216,10 +242,11 @@ One Rust process owns audio, inference, hotkeys, I/O and persistence. The web UI
 
 | Module | Responsibility |
 |---|---|
-| `hotkey` | Global triggers (macOS `Fn` event tap, `rdev`, Wayland portal stub) and the tap and double-tap gesture logic |
+| `hotkey` | Global triggers (macOS `Fn` event tap, `rdev`, the Wayland GlobalShortcuts portal) and the tap and double-tap gesture logic |
 | `audio` | `cpal` capture, resampling to 16 kHz mono, energy VAD, level meter |
 | `dictation` | Pure state machine plus the controller that wires audio, STT, post-processing, insertion and storage |
-| `stt` | `ChunkPlanner`, `SttSession`, the worker thread and the sherpa-onnx engine |
+| `stt` | `ChunkPlanner`, `SttSession`, the worker thread, the sherpa-onnx engine and BYOK cloud transcription |
+| `stats` | Home dashboard statistics (local days, streaks, time saved) and history retention |
 | `models` | Catalog, Hugging Face search, resumable verified downloader, hardware detection, lifecycle |
 | `postprocess` | Spacing and capitalization fixes, dictionary replacements |
 | `llm` | AI cleanup and Command Mode: prompts, the llama.cpp worker, OpenAI and Anthropic clients |
@@ -288,10 +315,11 @@ The manual end-to-end checks for dictation in real apps are listed in [docs/E2E-
 
 ## Roadmap
 
-- **Linux/Wayland**: global shortcuts through the XDG GlobalShortcuts portal.
+- ~~**Linux/Wayland**: global shortcuts through the XDG GlobalShortcuts portal.~~ Done.
 - ~~**Part 2, text intelligence**: local LLM cleanup (llama.cpp), an optional API key for OpenAI or Anthropic,
-  Command Mode, snippets and per-app styles.~~ Done.
-- **Part 3, dashboard**: a dashboard like Wispr's with words, WPM, streaks and time saved, plus full history.
+  Command Mode, snippets and per-app styles.~~ Done, plus OpenRouter.
+- ~~**Part 3, dashboard**: a dashboard like Wispr's with words, WPM, streaks and time saved, plus full history.~~ Done,
+  plus bring-your-own-key speech, a guided setup and an in-app tour.
 
 Not planned for Part 1: auto-update, accounts or sync. Release process: [docs/RELEASING.md](docs/RELEASING.md).
 

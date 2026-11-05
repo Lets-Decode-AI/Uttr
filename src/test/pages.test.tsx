@@ -8,6 +8,7 @@ const entry = (id: string, name: string) => ({
 });
 const settings = {
   hotkey: { keys: ['Fn'] }, mic: null, showFlowbar: true, idleUnloadMin: 10, preload: true, launchAtLogin: false, onboarded: false,
+  sttProvider: 'local', sttCloudBaseUrl: 'https://api.openai.com/v1', sttCloudModel: 'whisper-1', sttCloudLanguage: '',
 };
 
 vi.mock('../ipc', () => ({
@@ -20,6 +21,7 @@ vi.mock('../ipc', () => ({
     settingsGet: vi.fn(), settingsSet: vi.fn(async () => {}), hfTokenSet: vi.fn(async () => {}),
     dictionaryList: vi.fn(async () => []), dictionaryAdd: vi.fn(async () => 1), dictionaryDelete: vi.fn(async () => {}),
     micList: vi.fn(async () => ['Built-in Mic']), openLogFolder: vi.fn(async () => {}),
+    aiKeysStatus: vi.fn(async () => ({ openAi: false, anthropic: false, openRouter: false, speech: false })), aiKeySet: vi.fn(async () => {}), recentApps: vi.fn(async () => []),
   },
   on: vi.fn(async (name: string, cb: (p: any) => void) => {
     (handlers[name] ||= []).push(cb);
@@ -175,14 +177,14 @@ describe('History', () => {
   it('history_search_debounces_and_queries', async () => {
     render(<History />);
     await flush();
-    expect(a.historyList).toHaveBeenCalledWith(0, undefined);
+    expect(a.historyList).toHaveBeenCalledWith(0, undefined, undefined);
     const box = screen.getByPlaceholderText(/search/i);
     for (const v of ['h', 'he', 'hello']) fireEvent.change(box, { target: { value: v } });
     await tick(200);
     expect(a.historyList).toHaveBeenCalledTimes(1);
     await tick(150);
     expect(a.historyList).toHaveBeenCalledTimes(2);
-    expect(a.historyList).toHaveBeenLastCalledWith(0, 'hello');
+    expect(a.historyList).toHaveBeenLastCalledWith(0, 'hello', undefined);
   });
 });
 
@@ -207,10 +209,37 @@ describe('History paging', () => {
 });
 
 describe('Settings', () => {
+  it('settings_keep_history_saves_the_retention', async () => {
+    render(<Settings />);
+    await flush();
+    fireEvent.change(screen.getByLabelText('Keep history'), { target: { value: '30' } });
+    await flush();
+    expect(a.settingsSet.mock.calls.at(-1)[0].historyRetentionDays).toBe(30);
+    fireEvent.change(screen.getByLabelText('Keep history'), { target: { value: 'null' } });
+    await flush();
+    expect(a.settingsSet.mock.calls.at(-1)[0].historyRetentionDays).toBe(null);
+  });
+
+  it('settings_help_restarts_the_tour', async () => {
+    const seen = vi.fn();
+    window.addEventListener('uttr:tour', seen);
+    render(<Settings />);
+    await flush();
+    fireEvent.click(screen.getByRole('button', { name: 'Take the tour' }));
+    expect(seen).toHaveBeenCalled();
+    window.removeEventListener('uttr:tour', seen);
+  });
+
+  it('settings_explain_technical_options', async () => {
+    render(<Settings />);
+    await flush();
+    expect(screen.getAllByRole('button', { name: 'More information' }).length).toBeGreaterThanOrEqual(3);
+  });
+
   it('settings_groups_follow_system_settings_layout', async () => {
     render(<Settings />);
     await flush();
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Dictation', 'Model', 'General', 'Personal dictionary', 'Hugging Face', 'Troubleshooting']);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Dictation', 'Model', 'General', 'History', 'Personal dictionary', 'Hugging Face', 'Help', 'Troubleshooting']);
     expect(screen.getByRole('switch', { name: 'Show Flow Bar' })).toBeTruthy();
     expect(screen.getByRole('switch', { name: 'Load at startup' })).toBeTruthy();
     expect(screen.getByRole('switch', { name: 'Open at login' })).toBeTruthy();

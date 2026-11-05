@@ -137,11 +137,8 @@ impl SttEngine for SherpaEngine {
                 })
                 .map_err(|e| anyhow!("{e}"))?,
             ),
-            EngineKind::Llm => {
-                return Err(anyhow!(
-                    "{} is a text model, not a speech model",
-                    m.entry.id
-                ));
+            EngineKind::Llm | EngineKind::Cloud => {
+                return Err(anyhow!("{} is not an on-device speech model", m.entry.id));
             }
         };
         self.recognizer = Some(r);

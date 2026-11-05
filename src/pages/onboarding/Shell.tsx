@@ -1,7 +1,10 @@
 import type { ReactNode } from 'react';
 import Button from '../../components/ui/Button';
 
-export const STEP_NAMES = ['Welcome', 'Shortcut', 'Permissions', 'Speech model', 'Try it'];
+export const STEP_NAMES = ['Welcome', 'Shortcut', 'Permissions', 'Speech model', 'How it works', 'Try it', 'All set'];
+
+// Remembered so a restart (needed on macOS to pick up Accessibility) resumes the same step.
+export const STEP_KEY = 'uttr.onboardingStep';
 
 export interface StepProps {
   onNext: () => void;

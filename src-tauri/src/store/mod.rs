@@ -120,6 +120,17 @@ impl Store {
         page_size: u32,
         query: Option<&str>,
     ) -> Result<Vec<Transcript>> {
+        self.list_transcripts_in(page, page_size, query, None)
+    }
+
+    /// [`Self::list_transcripts`], optionally only those dictated into `app`.
+    pub fn list_transcripts_in(
+        &self,
+        page: u32,
+        page_size: u32,
+        query: Option<&str>,
+        app: Option<&str>,
+    ) -> Result<Vec<Transcript>> {
         let conn = self.lock()?;
         let pattern = query
             .filter(|q| !q.is_empty())
@@ -133,11 +144,12 @@ impl Store {
             .unwrap_or_else(|| "%".to_string());
         let mut stmt = conn.prepare(
             "SELECT id, created_at, text, raw_text, app_name, duration_ms, word_count, wpm, model_id
-             FROM transcripts WHERE text LIKE ?1 ESCAPE '\\'
+             FROM transcripts WHERE text LIKE ?1 ESCAPE '\\' AND (?4 IS NULL OR app_name = ?4)
              ORDER BY created_at DESC, id DESC LIMIT ?2 OFFSET ?3",
         )?;
         let offset = i64::from(page) * i64::from(page_size);
-        let rows = stmt.query_map(params![pattern, i64::from(page_size), offset], |r| {
+        let app = app.filter(|a| !a.is_empty());
+        let rows = stmt.query_map(params![pattern, i64::from(page_size), offset, app], |r| {
             Ok(Transcript {
                 id: r.get(0)?,
                 created_at: r.get(1)?,
@@ -148,6 +160,29 @@ impl Store {
                 word_count: r.get(6)?,
                 wpm: r.get(7)?,
                 model_id: r.get(8)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// Deletes transcripts created before `cutoff_ms`; returns how many.
+    pub fn purge_transcripts_before(&self, cutoff_ms: i64) -> Result<usize> {
+        Ok(self
+            .lock()?
+            .execute("DELETE FROM transcripts WHERE created_at < ?1", [cutoff_ms])?)
+    }
+
+    /// What the Home dashboard's statistics need from every transcript.
+    pub fn stats_rows(&self) -> Result<Vec<crate::stats::Row>> {
+        let conn = self.lock()?;
+        let mut stmt =
+            conn.prepare("SELECT created_at, word_count, duration_ms, app_name FROM transcripts")?;
+        let rows = stmt.query_map([], |r| {
+            Ok(crate::stats::Row {
+                created_at: r.get(0)?,
+                words: r.get(1)?,
+                duration_ms: r.get(2)?,
+                app: r.get(3)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -356,6 +391,53 @@ mod tests {
             s.insert_transcript(t).unwrap();
         }
         assert_eq!(s.recent_apps(10).unwrap(), ["Mail", "Slack"]);
+    }
+
+    #[test]
+    fn purge_removes_only_older_transcripts() {
+        let s = Store::open_in_memory().unwrap();
+        s.insert_transcript(nt(100, "old")).unwrap();
+        s.insert_transcript(nt(200, "edge")).unwrap();
+        s.insert_transcript(nt(300, "new")).unwrap();
+        assert_eq!(s.purge_transcripts_before(200).unwrap(), 1);
+        let left: Vec<String> = s
+            .list_transcripts(0, 10, None)
+            .unwrap()
+            .into_iter()
+            .map(|t| t.text)
+            .collect();
+        assert_eq!(left, ["new", "edge"]);
+    }
+
+    #[test]
+    fn history_filters_by_app() {
+        let s = Store::open_in_memory().unwrap();
+        let mut a = nt(1, "in mail");
+        a.app_name = Some("Mail".into());
+        let mut b = nt(2, "in slack");
+        b.app_name = Some("Slack".into());
+        s.insert_transcript(a).unwrap();
+        s.insert_transcript(b).unwrap();
+        let hits = s.list_transcripts_in(0, 10, None, Some("Mail")).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].text, "in mail");
+        let hits = s
+            .list_transcripts_in(0, 10, Some("slack"), Some("Mail"))
+            .unwrap();
+        assert!(hits.is_empty(), "query and app filter combine");
+    }
+
+    #[test]
+    fn stats_rows_carry_words_duration_and_app() {
+        let s = Store::open_in_memory().unwrap();
+        s.insert_transcript(nt(5, "x")).unwrap();
+        let rows = s.stats_rows().unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            (rows[0].created_at, rows[0].words, rows[0].duration_ms),
+            (5, 2, 1000)
+        );
+        assert_eq!(rows[0].app.as_deref(), Some("Notes"));
     }
 
     #[test]

@@ -9,6 +9,8 @@ pub enum EngineKind {
     SenseVoice,
     /// A GGUF text model for AI cleanup and Command Mode (llama.cpp), not a speech model.
     Llm,
+    /// A cloud transcription service used with the user's own key (never in a catalog).
+    Cloud,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

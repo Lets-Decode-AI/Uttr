@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { on, type EventPayloads } from '../ipc';
 
 export function useHash(): string {
-  const read = () => window.location.hash.replace(/^#/, '') || '/history';
+  const read = () => window.location.hash.replace(/^#/, '') || '/home';
   const [h, setH] = useState(read);
   useEffect(() => {
     const f = () => setH(read());
