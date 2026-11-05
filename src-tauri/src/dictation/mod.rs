@@ -90,6 +90,11 @@ impl SttPort for SttHandle {
 
 pub trait ModelSource: Send + Sync {
     fn active(&self) -> Option<InstalledModel>;
+    /// Why there is no active model when one is configured but cannot run (for example a
+    /// missing API key). `None`: simply nothing installed.
+    fn unavailable(&self) -> Option<String> {
+        None
+    }
 }
 
 impl ModelSource for Manager {
@@ -537,7 +542,10 @@ impl Controller {
                 if starts && self.d.models.active().is_none() {
                     // Straight to the error: no Recording flicker, Esc never armed.
                     (self.d.on_no_model)();
-                    self.run(Input::NoModel);
+                    match self.d.models.unavailable() {
+                        Some(why) => self.run(Input::NotReady(why)),
+                        None => self.run(Input::NoModel),
+                    }
                 } else if starts && (self.d.mic_denied)() {
                     self.toast("error", machine::MIC_DENIED);
                     self.run(Input::MicDenied);

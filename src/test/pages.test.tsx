@@ -8,6 +8,7 @@ const entry = (id: string, name: string) => ({
 });
 const settings = {
   hotkey: { keys: ['Fn'] }, mic: null, showFlowbar: true, idleUnloadMin: 10, preload: true, launchAtLogin: false, onboarded: false,
+  sttProvider: 'local', sttCloudBaseUrl: 'https://api.openai.com/v1', sttCloudModel: 'whisper-1', sttCloudLanguage: '',
 };
 
 vi.mock('../ipc', () => ({
@@ -20,6 +21,7 @@ vi.mock('../ipc', () => ({
     settingsGet: vi.fn(), settingsSet: vi.fn(async () => {}), hfTokenSet: vi.fn(async () => {}),
     dictionaryList: vi.fn(async () => []), dictionaryAdd: vi.fn(async () => 1), dictionaryDelete: vi.fn(async () => {}),
     micList: vi.fn(async () => ['Built-in Mic']), openLogFolder: vi.fn(async () => {}),
+    aiKeysStatus: vi.fn(async () => ({ openAi: false, anthropic: false, openRouter: false, speech: false })), aiKeySet: vi.fn(async () => {}),
   },
   on: vi.fn(async (name: string, cb: (p: any) => void) => {
     (handlers[name] ||= []).push(cb);

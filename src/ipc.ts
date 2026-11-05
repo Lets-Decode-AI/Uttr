@@ -26,7 +26,10 @@ export interface Binding {
   keys: Key[];
 }
 
-export type AiProvider = 'off' | 'local' | 'openAi' | 'anthropic';
+export type AiProvider = 'off' | 'local' | 'openAi' | 'anthropic' | 'openRouter';
+export type SttProvider = 'local' | 'cloud';
+/** Which API key `aiKeySet` stores. */
+export type KeyFor = 'openAi' | 'anthropic' | 'openRouter' | 'speech';
 export type Style = 'formal' | 'casual' | 'veryCasual';
 export interface AppStyle {
   app: string;
@@ -50,8 +53,19 @@ export interface Settings {
   /** OpenAI or a compatible server (Ollama, LM Studio), including `/v1`. */
   openaiBaseUrl: string;
   anthropicModel: string;
+  /** An OpenRouter model id, such as `anthropic/claude-opus-5.5`. */
+  openrouterModel: string;
   defaultStyle: Style;
   appStyles: AppStyle[];
+  /** Speech-to-text on this computer, or a cloud service with your own key (BYOK). */
+  sttProvider: SttProvider;
+  /** OpenAI-compatible transcription server, including `/v1`. */
+  sttCloudBaseUrl: string;
+  sttCloudModel: string;
+  /** ISO language code; empty = detect. */
+  sttCloudLanguage: string;
+  /** Days of history to keep; null = forever. */
+  historyRetentionDays: number | null;
 }
 
 export type EngineKind = 'transducer' | 'whisper' | 'moonshine' | 'sensevoice' | 'llm';
@@ -133,6 +147,17 @@ export interface Snippet {
 export interface AiKeysStatus {
   openAi: boolean;
   anthropic: boolean;
+  openRouter: boolean;
+  /** The cloud speech-to-text key. */
+  speech: boolean;
+}
+/** One model from OpenRouter's catalog. Prices are US dollars per million tokens. */
+export interface RouterModel {
+  id: string;
+  name: string;
+  contextLength: number;
+  inputPerM: number | null;
+  outputPerM: number | null;
 }
 export interface Toast {
   level: 'info' | 'warning' | 'error' | string;
@@ -186,7 +211,9 @@ export const api = {
   llmCatalog: () => invoke<CatalogEntry[]>('llm_catalog'),
   llmInstalled: () => invoke<InstalledModelDto[]>('llm_installed'),
   aiKeysStatus: () => invoke<AiKeysStatus>('ai_keys_status'),
-  aiKeySet: (provider: 'openAi' | 'anthropic', key: string | null) => invoke<void>('ai_key_set', { provider, key }),
+  aiKeySet: (provider: KeyFor, key: string | null) => invoke<void>('ai_key_set', { provider, key }),
+  /** OpenRouter's public model list. */
+  openrouterModels: () => invoke<RouterModel[]>('openrouter_models'),
   /** Runs text through the current AI settings: cleanup, or a Command Mode instruction. */
   aiTry: (text: string, command: boolean) => invoke<string>('ai_try', { text, command }),
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, type AiKeysStatus, type AiProvider, type CatalogEntry, type DownloadProgress, type InstalledModelDto, type Settings } from '../ipc';
+import { api, type AiKeysStatus, type AiProvider, type CatalogEntry, type DownloadProgress, type InstalledModelDto, type RouterModel, type Settings } from '../ipc';
 import HotkeyInput, { type HotkeyPreset } from '../components/HotkeyInput';
+import { KeyForm, TextSetting } from '../components/SettingFields';
 import ModelRow from '../components/ModelRow';
 import { useToast } from '../components/Toasts';
 import Button from '../components/ui/Button';
@@ -17,6 +18,7 @@ const PROVIDERS: { value: AiProvider; label: string }[] = [
   { value: 'local', label: 'On this computer' },
   { value: 'openAi', label: 'OpenAI' },
   { value: 'anthropic', label: 'Anthropic' },
+  { value: 'openRouter', label: 'OpenRouter' },
 ];
 
 const COMMAND_PRESETS: HotkeyPreset[] = [
@@ -30,11 +32,12 @@ const FOOTERS: Record<AiProvider, string> = {
   local: 'The model runs on this computer, so your text never leaves it. Larger models write better and need more memory.',
   openAi: 'Your dictated text is sent to OpenAI, or to the server you set below. Audio always stays on this computer.',
   anthropic: 'Your dictated text is sent to Anthropic. Audio always stays on this computer.',
+  openRouter: 'Your dictated text is sent to OpenRouter, which passes it to the model you pick. Audio always stays on this computer.',
 };
 
 export default function Ai() {
   const { s, error, save } = useSettings();
-  const [keys, setKeys] = useState<AiKeysStatus>({ openAi: false, anthropic: false });
+  const [keys, setKeys] = useState<AiKeysStatus>({ openAi: false, anthropic: false, openRouter: false, speech: false });
   const refreshKeys = useCallback(() => api.aiKeysStatus().then(setKeys, () => {}), []);
   useEffect(() => { refreshKeys(); }, [refreshKeys]);
 
@@ -69,6 +72,13 @@ export default function Ai() {
         </Group>
       )}
 
+      {s.aiProvider === 'openRouter' && (
+        <Group title="OpenRouter" footer="One key for models from Anthropic, OpenAI, Google, Meta, Mistral and more. Prices are per million tokens; a dictation uses a few hundred.">
+          <KeyForm provider="openRouter" label="OpenRouter API key" stored={keys.openRouter} onChange={refreshKeys} />
+          <RouterModelPicker value={s.openrouterModel} onSave={(openrouterModel) => save({ openrouterModel })} />
+        </Group>
+      )}
+
       <CommandMode s={s} save={save} />
       {s.aiProvider !== 'off' && <TryIt />}
     </div>
@@ -97,38 +107,47 @@ function CommandMode({ s, save }: { s: Settings; save: (p: Partial<Settings>) =>
   );
 }
 
-/** A text setting saved when the field loses focus or Return is pressed. */
-function TextSetting({ label, value, onSave }: { label: string; value: string; onSave: (v: string) => void }) {
-  const [v, setV] = useState(value);
-  useEffect(() => setV(value), [value]);
-  const commit = () => { if (v.trim() && v.trim() !== value) onSave(v.trim()); else setV(value); };
-  return (
-    <form className="ui-row ui-row-form" onSubmit={(e) => { e.preventDefault(); commit(); }}>
-      <span className="ui-row-label ai-field-label">{label}</span>
-      <input className="ui-field" aria-label={label} value={v} spellCheck={false} onChange={(e) => setV(e.target.value)} onBlur={commit} />
-    </form>
-  );
+const price = (n: number) => `$${Number.isInteger(n) ? n : n.toFixed(n < 1 ? 2 : 1).replace(/0$/, '')}`;
+/** "$0.25 / $2 per 1M tokens", "Free", or nothing when OpenRouter lists no price. */
+export function priceLabel(m: RouterModel): string {
+  if (m.inputPerM === null || m.outputPerM === null) return '';
+  if (m.inputPerM === 0 && m.outputPerM === 0) return 'Free';
+  return `${price(m.inputPerM)} / ${price(m.outputPerM)} per 1M tokens`;
 }
 
-function KeyForm({ provider, label, stored, onChange }: { provider: 'openAi' | 'anthropic'; label: string; stored: boolean; onChange: () => void }) {
-  const toast = useToast();
-  const [key, setKey] = useState('');
-  const store = async (k: string | null) => {
-    try {
-      await api.aiKeySet(provider, k);
-      setKey('');
-      toast(k ? 'Key saved to your keychain' : 'Key removed');
-      onChange();
-    } catch (e) {
-      toast(errMsg(e), 'error');
-    }
-  };
+/** Searchable OpenRouter model list; a plain text field when the list cannot be loaded. */
+function RouterModelPicker({ value, onSave }: { value: string; onSave: (id: string) => void }) {
+  const [models, setModels] = useState<RouterModel[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [q, setQ] = useState('');
+  useEffect(() => {
+    let live = true;
+    api.openrouterModels().then((m) => live && setModels(m), () => live && setFailed(true));
+    return () => { live = false; };
+  }, []);
+  if (failed) return <TextSetting label="Model" value={value} onSave={onSave} />;
+  const term = q.trim().toLowerCase();
+  const hits = term ? (models ?? []).filter((m) => m.id.toLowerCase().includes(term) || m.name.toLowerCase().includes(term)).slice(0, 8) : [];
+  const current = models?.find((m) => m.id === value);
   return (
-    <form className="ui-row ui-row-form" onSubmit={(e) => { e.preventDefault(); if (key.trim()) store(key.trim()); }}>
-      <input className="ui-field" type="password" aria-label={label} placeholder={stored ? 'Key saved. Enter a new one to replace it.' : 'API key'} autoComplete="off" value={key} onChange={(e) => setKey(e.target.value)} />
-      <Button type="submit" disabled={!key.trim()}>Save</Button>
-      {stored && <Button variant="plain" onClick={() => store(null)}>Remove</Button>}
-    </form>
+    <>
+      <Row label="Model" detail={current ? `${current.name}${priceLabel(current) ? ` · ${priceLabel(current)}` : ''}` : undefined} accessory={<code className="ai-model-id">{value}</code>} />
+      <div className="ui-row ai-picker">
+        <input className="ui-field" aria-label="Search OpenRouter models" placeholder={models ? `Search ${models.length} models` : 'Loading models…'} value={q} onChange={(e) => setQ(e.target.value)} disabled={!models} />
+        {hits.length > 0 && (
+          <ul className="ai-picker-list" role="listbox" aria-label="OpenRouter models">
+            {hits.map((m) => (
+              <li key={m.id} role="option" aria-selected={m.id === value} tabIndex={0} className="ai-picker-item"
+                onClick={() => { onSave(m.id); setQ(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSave(m.id); setQ(''); } }}>
+                <span className="ai-picker-name">{m.name}</span>
+                <span className="ai-picker-meta">{[m.id, priceLabel(m)].filter(Boolean).join(' · ')}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </>
   );
 }
 

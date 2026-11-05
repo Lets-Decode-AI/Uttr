@@ -413,8 +413,8 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     {
         let keys = ai_keys.clone();
         std::thread::spawn(move || {
-            for p in [llm::AiProvider::OpenAi, llm::AiProvider::Anthropic] {
-                keys.set(p, commands::stored_ai_key(p));
+            for user in llm::KEYRING_USERS {
+                keys.set(user, commands::stored_key(user));
             }
         });
     }
@@ -468,13 +468,20 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Controller (needs a tokio runtime context).
     let store = Arc::new(store);
     let arm_slot = hotkey.clone();
+    // Each dictation goes to the on-device engine or, with BYOK speech on, to the cloud.
+    let speech = Arc::new(stt::cloud::SpeechRouter::new(
+        Arc::new(stt.clone()),
+        Arc::new(models.clone()),
+        settings_arc.clone(),
+        ai_keys.clone(),
+    ));
     let controller = tauri::async_runtime::block_on(async {
         dictation::Controller::spawn(dictation::ControllerDeps {
             hotkeys: hk_rx,
             levels: Some(level_rx),
             recorder: recorder.clone(),
-            stt: Arc::new(stt.clone()),
-            models: Arc::new(models.clone()),
+            stt: speech.clone(),
+            models: speech,
             inserter: Arc::new(insert::ClipboardInserter::system(Arc::new({
                 let h = handle.clone();
                 move |job| {
@@ -597,6 +604,7 @@ pub fn run() {
             commands::ai_keys_status,
             commands::ai_key_set,
             commands::ai_try,
+            commands::openrouter_models,
             commands::snippet_list,
             commands::snippet_add,
             commands::snippet_update,

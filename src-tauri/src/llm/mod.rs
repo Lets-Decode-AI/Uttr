@@ -27,6 +27,8 @@ pub enum AiProvider {
     Local,
     OpenAi,
     Anthropic,
+    /// OpenRouter: hundreds of models from many providers behind one key.
+    OpenRouter,
 }
 
 /// Dictations shorter than this many words are inserted without AI cleanup: there is little
@@ -38,6 +40,9 @@ const CLOUD_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub const KEYRING_OPENAI: &str = "openai_api_key";
 pub const KEYRING_ANTHROPIC: &str = "anthropic_api_key";
+pub const KEYRING_OPENROUTER: &str = "openrouter_api_key";
+/// Key for bring-your-own cloud speech-to-text.
+pub const KEYRING_STT: &str = "stt_api_key";
 
 pub const NEEDS_PROVIDER: &str = "Command Mode needs AI. Choose an AI provider on the AI page.";
 
@@ -71,31 +76,40 @@ impl TextAi for NoAi {
     }
 }
 
-/// API keys from the system keychain, cached in memory.
+/// API keys from the system keychain, cached in memory, by keychain account name.
 #[derive(Clone, Default)]
-pub struct Keys(Arc<Mutex<HashMap<AiProvider, String>>>);
+pub struct Keys(Arc<Mutex<HashMap<&'static str, String>>>);
 
 impl Keys {
-    pub fn get(&self, p: AiProvider) -> Option<String> {
+    pub fn get(&self, user: &str) -> Option<String> {
         self.0
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .get(&p)
+            .get(user)
             .cloned()
     }
-    pub fn set(&self, p: AiProvider, key: Option<String>) {
+    pub fn set(&self, user: &'static str, key: Option<String>) {
         let mut m = self.0.lock().unwrap_or_else(|e| e.into_inner());
         match key.filter(|k| !k.is_empty()) {
-            Some(k) => m.insert(p, k),
-            None => m.remove(&p),
+            Some(k) => m.insert(user, k),
+            None => m.remove(user),
         };
     }
 }
+
+/// Every keychain account uttr keeps an API key under.
+pub const KEYRING_USERS: &[&str] = &[
+    KEYRING_OPENAI,
+    KEYRING_ANTHROPIC,
+    KEYRING_OPENROUTER,
+    KEYRING_STT,
+];
 
 pub fn keyring_user(p: AiProvider) -> Option<&'static str> {
     match p {
         AiProvider::OpenAi => Some(KEYRING_OPENAI),
         AiProvider::Anthropic => Some(KEYRING_ANTHROPIC),
+        AiProvider::OpenRouter => Some(KEYRING_OPENROUTER),
         _ => None,
     }
 }
@@ -141,14 +155,19 @@ impl Ai {
                 .ensure_active()
                 .is_none()
                 .then(|| "Download an on-device AI model on the AI page first.".into()),
-            AiProvider::OpenAi => (self.keys.get(AiProvider::OpenAi).is_none()
+            AiProvider::OpenAi => (self.keys.get(KEYRING_OPENAI).is_none()
                 && s.openai_base_url.trim_end_matches('/') == cloud::OPENAI_URL)
                 .then(|| "Add your OpenAI API key on the AI page.".into()),
             AiProvider::Anthropic => self
                 .keys
-                .get(AiProvider::Anthropic)
+                .get(KEYRING_ANTHROPIC)
                 .is_none()
                 .then(|| "Add your Anthropic API key on the AI page.".into()),
+            AiProvider::OpenRouter => self
+                .keys
+                .get(KEYRING_OPENROUTER)
+                .is_none()
+                .then(|| "Add your OpenRouter API key on the AI page.".into()),
         }
     }
 
@@ -174,17 +193,29 @@ impl Ai {
                 self.local.complete(&m.dir.join(&file.path), prompt)?
             }
             AiProvider::OpenAi => {
-                let key = self.keys.get(AiProvider::OpenAi);
+                let key = self.keys.get(KEYRING_OPENAI);
                 tauri::async_runtime::block_on(cloud::openai(
                     &self.http,
                     &s.openai_base_url,
                     key.as_deref(),
                     &s.openai_model,
                     &prompt,
+                    &[],
+                ))?
+            }
+            AiProvider::OpenRouter => {
+                let key = self.keys.get(KEYRING_OPENROUTER);
+                tauri::async_runtime::block_on(cloud::openai(
+                    &self.http,
+                    cloud::OPENROUTER_URL,
+                    key.as_deref(),
+                    &s.openrouter_model,
+                    &prompt,
+                    cloud::OPENROUTER_HEADERS,
                 ))?
             }
             AiProvider::Anthropic => {
-                let key = self.keys.get(AiProvider::Anthropic).unwrap_or_default();
+                let key = self.keys.get(KEYRING_ANTHROPIC).unwrap_or_default();
                 tauri::async_runtime::block_on(cloud::anthropic(
                     &self.http,
                     &self.anthropic_base,
@@ -234,5 +265,67 @@ impl TextAi for Ai {
             AiProvider::Off => Err(NEEDS_PROVIDER.into()),
             _ => self.not_ready(&s).map_or(Ok(()), Err),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::catalog::Catalog;
+    use crate::store::Store;
+
+    fn ai(provider: AiProvider, keys: Keys) -> (Ai, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open_in_memory().unwrap();
+        let models = Manager::new(
+            dir.path().to_path_buf(),
+            store,
+            Catalog::llm_bundled(),
+            crate::models::hf::HfClient::new(None),
+            Arc::new(|_| {}),
+        );
+        let settings = Settings {
+            ai_provider: provider,
+            ..Settings::default()
+        };
+        let ai = Ai::new(
+            Arc::new(Mutex::new(settings)),
+            LocalLlm::spawn(None),
+            models,
+            keys,
+        );
+        (ai, dir)
+    }
+
+    #[test]
+    fn openrouter_without_a_key_says_where_to_add_it() {
+        let (ai, _d) = ai(AiProvider::OpenRouter, Keys::default());
+        let e = ai.command_ready().unwrap_err();
+        assert!(e.contains("OpenRouter API key"), "{e}");
+    }
+
+    #[test]
+    fn openrouter_with_a_key_is_ready() {
+        let keys = Keys::default();
+        keys.set(KEYRING_OPENROUTER, Some("or-key".into()));
+        let (ai, _d) = ai(AiProvider::OpenRouter, keys);
+        assert!(ai.command_ready().is_ok());
+    }
+
+    #[test]
+    fn keys_are_kept_per_keychain_account() {
+        let keys = Keys::default();
+        keys.set(KEYRING_STT, Some("stt".into()));
+        keys.set(KEYRING_OPENAI, Some(String::new()));
+        assert_eq!(keys.get(KEYRING_STT).as_deref(), Some("stt"));
+        assert_eq!(keys.get(KEYRING_OPENAI), None, "an empty key is no key");
+    }
+
+    #[test]
+    fn provider_names_serialize_for_the_ui() {
+        assert_eq!(
+            serde_json::to_string(&AiProvider::OpenRouter).unwrap(),
+            r#""openRouter""#
+        );
     }
 }

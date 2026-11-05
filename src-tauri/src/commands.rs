@@ -15,7 +15,7 @@ use crate::app_state::{
 };
 use crate::events;
 use crate::hotkey::{HotkeyError, HotkeyEvent, HotkeyService, retry_hotkey_start};
-use crate::llm::{AiProvider, TextAi};
+use crate::llm::TextAi;
 use crate::models::Manager;
 use crate::models::catalog::{Catalog, CatalogEntry};
 use crate::models::hardware::Hardware;
@@ -39,8 +39,8 @@ pub fn stored_hf_token() -> Option<String> {
         .filter(|t| !t.is_empty())
 }
 
-pub fn stored_ai_key(p: AiProvider) -> Option<String> {
-    keyring::Entry::new(KEYRING_SERVICE, crate::llm::keyring_user(p)?)
+pub fn stored_key(user: &str) -> Option<String> {
+    keyring::Entry::new(KEYRING_SERVICE, user)
         .ok()?
         .get_password()
         .ok()
@@ -506,25 +506,55 @@ pub fn llm_installed(st: State<'_, AppState>) -> Vec<InstalledModelDto> {
 pub struct AiKeysStatus {
     open_ai: bool,
     anthropic: bool,
+    open_router: bool,
+    speech: bool,
 }
 
 /// Which API keys are stored (never the keys themselves).
 #[tauri::command]
 pub fn ai_keys_status(st: State<'_, AppState>) -> AiKeysStatus {
+    let has = |user| st.ai_keys.get(user).is_some();
     AiKeysStatus {
-        open_ai: st.ai_keys.get(AiProvider::OpenAi).is_some(),
-        anthropic: st.ai_keys.get(AiProvider::Anthropic).is_some(),
+        open_ai: has(crate::llm::KEYRING_OPENAI),
+        anthropic: has(crate::llm::KEYRING_ANTHROPIC),
+        open_router: has(crate::llm::KEYRING_OPENROUTER),
+        speech: has(crate::llm::KEYRING_STT),
     }
+}
+
+/// OpenRouter's model list for the model picker (public; no key needed).
+#[tauri::command]
+pub async fn openrouter_models() -> Result<Vec<crate::llm::cloud::RouterModel>, String> {
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .build()
+        .map_err(err)?;
+    crate::llm::cloud::openrouter_models(&http, crate::llm::cloud::OPENROUTER_URL).await
+}
+
+/// Which key `ai_key_set` stores: an AI provider's, or the cloud speech-to-text key.
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum KeyFor {
+    OpenAi,
+    Anthropic,
+    OpenRouter,
+    Speech,
 }
 
 /// `None` removes the key. Runs off the main thread: keychain access can block on a prompt.
 #[tauri::command(async)]
 pub fn ai_key_set(
     st: State<'_, AppState>,
-    provider: AiProvider,
+    provider: KeyFor,
     key: Option<String>,
 ) -> Result<(), String> {
-    let user = crate::llm::keyring_user(provider).ok_or("This provider takes no API key.")?;
+    let user = match provider {
+        KeyFor::OpenAi => crate::llm::KEYRING_OPENAI,
+        KeyFor::Anthropic => crate::llm::KEYRING_ANTHROPIC,
+        KeyFor::OpenRouter => crate::llm::KEYRING_OPENROUTER,
+        KeyFor::Speech => crate::llm::KEYRING_STT,
+    };
     let entry = keyring::Entry::new(KEYRING_SERVICE, user).map_err(err)?;
     let key = key.map(|k| k.trim().to_string()).filter(|k| !k.is_empty());
     match &key {
@@ -534,7 +564,7 @@ pub fn ai_key_set(
             Err(e) => return Err(err(e)),
         },
     }
-    st.ai_keys.set(provider, key);
+    st.ai_keys.set(user, key);
     Ok(())
 }
 

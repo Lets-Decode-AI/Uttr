@@ -16,10 +16,12 @@ use crate::models::catalog::CatalogEntry;
 use crate::models::hardware::{Hardware, recommend};
 use crate::store::Store;
 use crate::stt::SttHandle;
+use crate::stt::cloud::{OPENAI_STT_URL, SttProvider};
 use crate::style::{AppStyle, Style};
 
 pub const DEFAULT_OPENAI_MODEL: &str = "gpt-5-mini";
 pub const DEFAULT_ANTHROPIC_MODEL: &str = "claude-opus-5-5";
+pub const DEFAULT_OPENROUTER_MODEL: &str = "anthropic/claude-opus-5.5";
 
 /// Key of the single JSON settings document in the store's settings table.
 pub const SETTINGS_KEY: &str = "settings";
@@ -43,9 +45,20 @@ pub struct Settings {
     /// OpenAI or any compatible server (Ollama, LM Studio), including `/v1`.
     pub openai_base_url: String,
     pub anthropic_model: String,
+    /// An OpenRouter model id, such as `anthropic/claude-opus-5.5`.
+    pub openrouter_model: String,
     /// Style for apps without their own rule.
     pub default_style: Style,
     pub app_styles: Vec<AppStyle>,
+    /// Speech-to-text on this computer, or a cloud service with the user's own key (BYOK).
+    pub stt_provider: SttProvider,
+    /// OpenAI-compatible transcription server, including `/v1`.
+    pub stt_cloud_base_url: String,
+    pub stt_cloud_model: String,
+    /// ISO language code; empty lets the service detect it.
+    pub stt_cloud_language: String,
+    /// Days of history to keep; `None` keeps everything.
+    pub history_retention_days: Option<u32>,
 }
 
 impl Default for Settings {
@@ -63,8 +76,14 @@ impl Default for Settings {
             openai_model: DEFAULT_OPENAI_MODEL.into(),
             openai_base_url: crate::llm::cloud::OPENAI_URL.into(),
             anthropic_model: DEFAULT_ANTHROPIC_MODEL.into(),
+            openrouter_model: DEFAULT_OPENROUTER_MODEL.into(),
             default_style: Style::Formal,
             app_styles: Vec::new(),
+            stt_provider: SttProvider::Local,
+            stt_cloud_base_url: OPENAI_STT_URL.into(),
+            stt_cloud_model: "whisper-1".into(),
+            stt_cloud_language: String::new(),
+            history_retention_days: None,
         }
     }
 }
@@ -231,10 +250,23 @@ pub fn validate_settings(s: &Settings) -> Result<(), String> {
     for (name, model) in [
         ("OpenAI", &s.openai_model),
         ("Anthropic", &s.anthropic_model),
+        ("OpenRouter", &s.openrouter_model),
     ] {
         if model.trim().is_empty() {
             return Err(format!("Enter a model name for {name}."));
         }
+    }
+    if s.stt_provider == SttProvider::Cloud {
+        let url = s.stt_cloud_base_url.trim();
+        if !(url.starts_with("https://") || url.starts_with("http://")) {
+            return Err("The speech server address must start with https:// or http://.".into());
+        }
+        if s.stt_cloud_model.trim().is_empty() {
+            return Err("Enter a speech model name.".into());
+        }
+    }
+    if s.history_retention_days == Some(0) {
+        return Err("Keep history for at least one day.".into());
     }
     Ok(())
 }
@@ -438,6 +470,35 @@ mod settings_apply_tests {
         };
         let e = commit_settings(&store, &cur, &auto, new).unwrap_err();
         assert!(e.contains("different shortcut"), "{e}");
+    }
+
+    #[test]
+    fn cloud_speech_needs_a_web_address_and_a_model() {
+        let (store, cur, auto) = fixture(false);
+        let bad_url = Settings {
+            stt_provider: SttProvider::Cloud,
+            stt_cloud_base_url: "api.groq.com".into(),
+            ..Settings::default()
+        };
+        let e = commit_settings(&store, &cur, &auto, bad_url).unwrap_err();
+        assert!(e.contains("speech server address"), "{e}");
+        let no_model = Settings {
+            stt_provider: SttProvider::Cloud,
+            stt_cloud_model: " ".into(),
+            ..Settings::default()
+        };
+        let e = commit_settings(&store, &cur, &auto, no_model).unwrap_err();
+        assert!(e.contains("speech model"), "{e}");
+    }
+
+    #[test]
+    fn history_retention_must_be_at_least_a_day() {
+        let (store, cur, auto) = fixture(false);
+        let s = Settings {
+            history_retention_days: Some(0),
+            ..Settings::default()
+        };
+        assert!(commit_settings(&store, &cur, &auto, s).is_err());
     }
 
     #[test]

@@ -199,10 +199,14 @@ impl SttPort for FakeStt {
     }
 }
 
-struct FakeModels(Mutex<Option<InstalledModel>>);
+/// The active model, and why it cannot run (`unavailable`).
+struct FakeModels(Mutex<Option<InstalledModel>>, Mutex<Option<String>>);
 impl ModelSource for FakeModels {
     fn active(&self) -> Option<InstalledModel> {
         self.0.lock().unwrap().clone()
+    }
+    fn unavailable(&self) -> Option<String> {
+        self.1.lock().unwrap().clone()
     }
 }
 
@@ -274,6 +278,7 @@ struct Harness {
     mic_denied: Arc<std::sync::atomic::AtomicBool>,
     no_model_calls: Arc<AtomicUsize>,
     ai: Arc<FakeAi>,
+    models: Arc<FakeModels>,
 }
 
 fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
@@ -286,6 +291,10 @@ fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
         selection: Mutex::default(),
     });
     let ai = Arc::new(FakeAi::default());
+    let models = Arc::new(FakeModels(
+        Mutex::new(with_model.then(|| model("m1"))),
+        Mutex::default(),
+    ));
     let store = Arc::new(Store::open_in_memory().unwrap());
     let events: Arc<Mutex<Vec<(String, Value)>>> = Arc::default();
     let esc: Arc<Mutex<Vec<bool>>> = Arc::default();
@@ -301,7 +310,7 @@ fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
         levels: Some(level_rx),
         recorder: rec.clone(),
         stt: stt.clone(),
-        models: Arc::new(FakeModels(Mutex::new(with_model.then(|| model("m1"))))),
+        models: models.clone(),
         inserter: ins.clone(),
         store: store.clone(),
         emit: Arc::new(move |name, v| ev.lock().unwrap().push((name.to_string(), v))),
@@ -326,6 +335,7 @@ fn harness(audio: Vec<f32>, with_model: bool) -> Harness {
         mic_denied,
         no_model_calls,
         ai,
+        models,
     }
 }
 
@@ -1070,4 +1080,25 @@ async fn command_mode_without_ai_cancels_and_explains() {
     h.send(HotkeyEvent::Released);
     settle().await;
     assert!(h.inserted().is_empty() && h.saved().is_empty());
+}
+
+// ---- BYOK speech ---------------------------------------------------------------------------
+
+#[tokio::test(start_paused = true)]
+async fn cloud_speech_without_a_key_explains_and_does_not_record() {
+    let h = harness(voiced(1.0), false);
+    *h.models.1.lock().unwrap() = Some(crate::stt::cloud::NEEDS_KEY.into());
+    h.send(HotkeyEvent::Pressed);
+    wait_for("error shown", || {
+        h.states()
+            .iter()
+            .any(|s| s["kind"] == "error" && s["message"] == crate::stt::cloud::NEEDS_KEY)
+    })
+    .await;
+    assert_eq!(h.rec.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        h.no_model_calls.load(Ordering::SeqCst),
+        1,
+        "the Models page opens"
+    );
 }

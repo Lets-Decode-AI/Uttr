@@ -129,6 +129,14 @@
 .ai-textarea { height: auto; padding: 6px 8px; resize: vertical; line-height: 1.4; }
 .ai-try-actions { display: flex; align-items: center; gap: 8px; }
 .ai-try-out { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px 10px; border-radius: var(--radius-control); background: var(--fill); }
+.ai-model-id { font: 12px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--label-secondary); }
+.ai-picker { flex-direction: column; align-items: stretch; gap: 6px; }
+.ai-picker-list { list-style: none; margin: 0; padding: 4px; border-radius: var(--radius-control); background: var(--fill); max-height: 240px; overflow-y: auto; }
+.ai-picker-item { display: flex; flex-direction: column; padding: 5px 8px; border-radius: 5px; cursor: pointer; }
+.ai-picker-item:hover, .ai-picker-item:focus-visible { background: var(--accent); color: var(--accent-fg); box-shadow: none; }
+.ai-picker-item:hover .ai-picker-meta, .ai-picker-item:focus-visible .ai-picker-meta { color: inherit; opacity: 0.85; }
+.ai-picker-name { font-weight: 500; }
+.ai-picker-meta { font-size: 12px; color: var(--label-secondary); }
 .snippet-row { align-items: flex-start; }
 .snippet-row .ui-row-accessory { align-self: center; }
 .snippet-expansion { white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
