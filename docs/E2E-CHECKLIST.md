@@ -42,6 +42,17 @@ For each of **TextEdit, a Safari textarea, VS Code and Slack**:
 - [ ] Snippets: add "my email" and say "my email." on its own: the address is inserted exactly. Inside a sentence it is expanded too.
 - [ ] Style: add Slack as Very casual, dictate "Sounds good." into Slack: "sounds good" is inserted. Mail with Formal keeps "Sounds good."
 
+## 3c. Part 3, BYOK and onboarding
+
+- [ ] AI page, OpenRouter: save a key, search "haiku", pick a model; Try it cleans up the sample.
+- [ ] Models page, Cloud (your key), Groq preset: save a key and dictate; the text arrives and History shows `cloud:whisper-large-v3-turbo`.
+- [ ] Cloud speech without a key: the shortcut shows "Add your speech API key on the Models page." and records nothing.
+- [ ] Home shows words, speed, streak and time saved after a few dictations; the chart's last bar is today.
+- [ ] History: filter by an app, switch on Show original, and set Keep history to 7 days.
+- [ ] A fresh setup (Settings > Help > Run setup) shows How it works with its animation and ends on All set; Start the tour walks all eight steps.
+- [ ] Hovering or tabbing to an icon button or an "i" shows its tooltip; Esc hides it.
+- [ ] Linux (Wayland, GNOME 48+ or Plasma 6): the desktop asks to approve Dictate and Command Mode; holding the shortcut dictates.
+
 ## 4. Performance
 
 - [ ] A 5 s utterance is inserted in under 500 ms after key-up on Apple Silicon. Check the timing in the logs, or use the numbers from the ignored integration test.

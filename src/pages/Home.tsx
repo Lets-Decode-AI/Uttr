@@ -24,10 +24,11 @@ function greeting(d = new Date()): string {
   return h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening';
 }
 
-function Tile({ label, value, hint, icon }: { label: string; value: string; hint: string; icon: IconName }) {
+/** `label` names the tile for screen readers; `short` is what fits on it. */
+function Tile({ label, short, value, hint, icon }: { label: string; short: string; value: string; hint: string; icon: IconName }) {
   return (
     <div className="home-tile" role="group" aria-label={label}>
-      <span className="home-tile-head"><Icon name={icon} size={14} />{label}<InfoTip text={hint} /></span>
+      <span className="home-tile-head"><Icon name={icon} size={14} /><span className="home-tile-label" aria-hidden="true">{short}</span><InfoTip text={hint} /></span>
       <span className="home-tile-value">{value}</span>
     </div>
   );
@@ -136,10 +137,10 @@ export default function Home() {
       {stats && !empty && (
         <>
           <div className="home-tiles">
-            <Tile label="Words dictated" icon="mic" value={stats.totalWords.toLocaleString()} hint={`Across ${stats.dictations.toLocaleString()} dictations.`} />
-            <Tile label="Average speed" icon="sparkle" value={`${Math.round(stats.avgWpm)} WPM`} hint="Words per minute while you speak. Typing is about 40." />
-            <Tile label="Day streak" icon="history" value={`${stats.currentStreak} ${stats.currentStreak === 1 ? 'day' : 'days'}`} hint={`Days in a row with a dictation. Your longest: ${stats.longestStreak}.`} />
-            <Tile label="Time saved" icon="check" value={fmtMinutes(stats.timeSavedMin)} hint="Compared with typing the same words at 40 words per minute." />
+            <Tile label="Words dictated" short="Words" icon="mic" value={stats.totalWords.toLocaleString()} hint={`Across ${stats.dictations.toLocaleString()} dictations.`} />
+            <Tile label="Average speed" short="Speed" icon="sparkle" value={`${Math.round(stats.avgWpm)} WPM`} hint="Words per minute while you speak. Typing is about 40." />
+            <Tile label="Day streak" short="Streak" icon="history" value={`${stats.currentStreak} ${stats.currentStreak === 1 ? 'day' : 'days'}`} hint={`Days in a row with a dictation. Your longest: ${stats.longestStreak}.`} />
+            <Tile label="Time saved" short="Time saved" icon="check" value={fmtMinutes(stats.timeSavedMin)} hint="Compared with typing the same words at 40 words per minute." />
           </div>
           <Group title="Last 30 days"><div className="ui-row home-chart-row"><Chart days={stats.days} /></div></Group>
           <div className="home-columns">
