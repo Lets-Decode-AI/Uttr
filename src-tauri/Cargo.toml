@@ -82,6 +82,8 @@ llama-cpp-2 = { version = "0.1.160", default-features = false }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Wayland global shortcuts (XDG GlobalShortcuts portal).
+ashpd = { version = "0.14", features = ["global_shortcuts"] }
 sherpa-rs = { version = "0.6", default-features = false, features = ["static"] }
 x11 = { version = "2.21", features = ["xlib"] }
 

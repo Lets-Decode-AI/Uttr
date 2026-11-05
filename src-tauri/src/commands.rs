@@ -134,7 +134,7 @@ pub fn spawn_hotkey_start(
                 Err(HotkeyError::Unsupported) => {
                     notice = Some((
                         "warning",
-                        "The global shortcut is not available on Wayland.".into(),
+                        "The shortcut needs a desktop with global shortcut support (GNOME 48 or KDE Plasma 6 and later).".into(),
                     ));
                     None
                 }
