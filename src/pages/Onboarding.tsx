@@ -1,14 +1,13 @@
 import { useEffect, useState } from 'react';
+import AllSet from './onboarding/AllSet';
+import HowItWorks from './onboarding/HowItWorks';
 import Model from './onboarding/Model';
 import Permissions from './onboarding/Permissions';
-import { Dots, STEP_NAMES } from './onboarding/Shell';
+import { Dots, STEP_KEY, STEP_NAMES } from './onboarding/Shell';
 import Shortcut from './onboarding/Shortcut';
 import TryIt from './onboarding/TryIt';
 import Welcome from './onboarding/Welcome';
 import { useDownloads } from './onboarding/useDownloads';
-
-// Remembered so a restart (needed on macOS to pick up Accessibility) resumes the same step.
-const STEP_KEY = 'uttr.onboardingStep';
 
 function savedStep(): number {
   try {
@@ -39,7 +38,9 @@ export default function Onboarding() {
       {step === 1 && <Shortcut {...props} />}
       {step === 2 && <Permissions {...props} />}
       {step === 3 && <Model {...props} downloads={downloads} />}
-      {step === 4 && <TryIt onBack={back} />}
+      {step === 4 && <HowItWorks {...props} />}
+      {step === 5 && <TryIt {...props} />}
+      {step === 6 && <AllSet onBack={back} goTo={setStep} />}
     </div>
   );
 }

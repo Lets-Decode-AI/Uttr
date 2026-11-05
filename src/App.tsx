@@ -1,6 +1,7 @@
 import type { JSX } from 'react';
 import PermissionBanner from './components/PermissionBanner';
 import Sidebar from './components/Sidebar';
+import Tour from './components/Tour';
 import { ToastProvider } from './components/Toasts';
 import { useHash } from './lib/hooks';
 import Ai from './pages/Ai';
@@ -34,6 +35,7 @@ export default function App() {
       ) : (
         <div className="shell">
           <Sidebar route={route} />
+          <Tour autoStart />
           <main className="content">
             <div className="content-drag" data-tauri-drag-region />
             <div className="content-body">

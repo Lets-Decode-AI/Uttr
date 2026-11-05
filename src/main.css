@@ -214,3 +214,50 @@
 .ui-tip-below { bottom: auto; top: calc(100% + 6px); }
 .ui-infotip { width: 15px; height: 15px; padding: 0; border-radius: 50%; border: 1px solid var(--separator); background: transparent; color: var(--label-secondary); font: 600 10px/1 var(--font); font-style: italic; cursor: help; display: inline-flex; align-items: center; justify-content: center; }
 .ui-infotip:hover, .ui-infotip:focus-visible { color: var(--accent); border-color: var(--accent); }
+
+/* ---- Tour ------------------------------------------------------------------------------- */
+.tour { position: fixed; inset: 0; z-index: 80; }
+.tour-dim { position: absolute; inset: 0; background: rgba(10, 18, 15, 0.45); }
+.tour-spot { position: absolute; border-radius: 10px; box-shadow: 0 0 0 9999px rgba(10, 18, 15, 0.45), 0 0 0 2px var(--accent); transition: all 220ms var(--ease); pointer-events: none; }
+.tour-target { position: relative; z-index: 81; }
+.tour-card { position: absolute; width: 300px; padding: 16px 16px 12px; border-radius: 12px; background: var(--surface); color: var(--label); box-shadow: 0 18px 48px rgba(0, 0, 0, 0.3), 0 0 0 1px var(--separator); animation: toast-in var(--dur) var(--ease); }
+.tour-card-center { top: 50%; left: 50%; transform: translate(-50%, -50%); }
+.tour-count { margin: 0 0 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent); }
+.tour-title { margin: 0 0 6px; font-size: 16px; }
+.tour-body { margin: 0 0 12px; line-height: 1.45; color: var(--label-secondary); }
+.tour-dots { display: flex; gap: 4px; margin-bottom: 12px; }
+.tour-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fill); }
+.tour-dot-on { background: var(--accent); width: 16px; border-radius: 3px; }
+.tour-actions { display: flex; align-items: center; justify-content: space-between; }
+.tour-actions-end { display: flex; gap: 6px; }
+@media (prefers-reduced-motion: reduce) { .tour-spot, .tour-card { transition: none; animation: none; } }
+
+/* ---- Onboarding: highlights, How it works, All set ---------------------------------------- */
+.onb-highlights { list-style: none; margin: 6px 0 0; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 8px; text-align: left; }
+.onb-highlight { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: var(--radius-group); background: var(--surface); box-shadow: 0 0 0 1px var(--separator); }
+.onb-highlight strong { display: block; margin-bottom: 2px; }
+.onb-highlight .muted { display: block; line-height: 1.4; }
+.onb-highlight-icon { flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--accent-tint); color: var(--accent); display: inline-flex; align-items: center; justify-content: center; }
+.onb-moves { margin: 4px 0 0; padding-left: 20px; text-align: left; display: flex; flex-direction: column; gap: 8px; line-height: 1.45; }
+.onb-moves .ui-keycaps { vertical-align: middle; margin: 0 2px; }
+.onb-summary { list-style: none; margin: 4px 0 0; padding: 0; width: 100%; text-align: left; }
+.demo { position: relative; width: 100%; height: 190px; border-radius: 14px; background: linear-gradient(160deg, var(--accent-tint), transparent 70%), var(--fill); overflow: hidden; }
+.demo-window { position: absolute; left: 50%; top: 22px; width: 300px; transform: translateX(-50%); border-radius: 10px; background: var(--surface); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 0 0 1px var(--separator); }
+.demo-bar { display: flex; gap: 5px; padding: 8px 10px; border-bottom: 1px solid var(--separator); }
+.demo-bar span { width: 8px; height: 8px; border-radius: 50%; background: var(--separator); }
+.demo-field { display: flex; align-items: center; height: 44px; padding: 0 12px; text-align: left; font-size: 13px; }
+.demo-text { display: inline-block; overflow: hidden; white-space: nowrap; width: 0; animation: demo-type 6s steps(36) infinite; }
+.demo-caret { width: 1.5px; height: 16px; background: var(--accent); animation: demo-blink 1s steps(1) infinite; }
+.demo-keys { position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); animation: demo-press 6s infinite; }
+.demo-pill { position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; align-items: center; gap: 3px; height: 26px; padding: 0 12px; border-radius: 999px; background: rgba(22, 38, 33, 0.9); opacity: 0; animation: demo-pill 6s infinite; }
+.demo-pill span { width: 3px; height: 12px; border-radius: 3px; background: #F3F0E8; animation: demo-wave 0.6s ease-in-out infinite alternate; }
+@keyframes demo-press { 0%, 12% { transform: translateX(-50%); opacity: 0.55; } 16%, 58% { transform: translateX(-50%) translateY(2px) scale(0.96); opacity: 1; } 62%, 100% { transform: translateX(-50%); opacity: 0.55; } }
+@keyframes demo-pill { 0%, 14% { opacity: 0; } 18%, 58% { opacity: 1; } 64%, 100% { opacity: 0; } }
+@keyframes demo-wave { from { transform: scaleY(0.4); } to { transform: scaleY(1.2); } }
+@keyframes demo-type { 0%, 62% { width: 0; } 80%, 100% { width: 36ch; } }
+@keyframes demo-blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .demo-text { animation: none; width: auto; }
+  .demo-keys, .demo-pill, .demo-pill span, .demo-caret { animation: none; }
+  .demo-pill { opacity: 1; }
+}

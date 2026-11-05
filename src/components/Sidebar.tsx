@@ -34,10 +34,10 @@ export default function Sidebar({ route }: { route: string }) {
       <div className="side-brand"><Logo size={22} />uttr</div>
       <nav>
         {NAV.map((n) => (
-          <a key={n.label} href={`#${n.route}`} className={`nav${route === n.route ? ' nav-on' : ''}`} aria-current={route === n.route ? 'page' : undefined}><Icon name={n.icon} />{n.label}</a>
+          <a key={n.label} href={`#${n.route}`} data-tour={n.route.slice(1)} className={`nav${route === n.route ? ' nav-on' : ''}`} aria-current={route === n.route ? 'page' : undefined}><Icon name={n.icon} />{n.label}</a>
         ))}
       </nav>
-      <div className="side-status" aria-live="polite"><span className={`status-dot${state.kind !== 'idle' ? ` status-${state.kind}` : ''}`} />{statusText(state)}</div>
+      <div className="side-status" data-tour="status" aria-live="polite"><span className={`status-dot${state.kind !== 'idle' ? ` status-${state.kind}` : ''}`} />{statusText(state)}</div>
     </aside>
   );
 }

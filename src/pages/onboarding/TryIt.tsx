@@ -6,7 +6,7 @@ import Button from '../../components/ui/Button';
 import Icon from '../../components/ui/Icon';
 import { keycapsFor } from '../../components/ui/Keycap';
 import { errMsg } from '../../lib/format';
-import { navigate, useEvent } from '../../lib/hooks';
+import { useEvent } from '../../lib/hooks';
 import { StepFrame, type StepProps } from './Shell';
 import { useBinding } from '../../lib/useBinding';
 
@@ -20,7 +20,7 @@ function describe(s: DictationState): string {
   }
 }
 
-export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
+export default function TryIt({ onBack, onNext }: StepProps) {
   const toast = useToast();
   const { binding } = useBinding();
   const [state, setState] = useState<DictationState>({ kind: 'idle' });
@@ -63,7 +63,6 @@ export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
     try {
       const s = await api.settingsGet();
       await api.settingsSet({ ...s, onboarded: true });
-      try { window.localStorage.removeItem('uttr.onboardingStep'); } catch { /* storage unavailable */ }
     } catch (e) {
       toast(errMsg(e), 'error');
     }
@@ -71,7 +70,7 @@ export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
 
   if (done) {
     return (
-      <StepFrame hideNext>
+      <StepFrame onNext={onNext}>
         <div className="onb-success" aria-hidden="true"><Icon name="check" size={28} /></div>
         <h1>You're set up.</h1>
         {transcript && (
@@ -80,13 +79,12 @@ export default function TryIt({ onBack }: Pick<StepProps, 'onBack'>) {
             <p className="muted">{transcript.wordCount} {transcript.wordCount === 1 ? 'word' : 'words'} · {Math.round(transcript.wpm)} WPM</p>
           </>
         )}
-        <Button variant="primary" size="large" onClick={() => navigate('/history')}>Start using uttr</Button>
       </StepFrame>
     );
   }
   const active = state.kind === 'recording' || state.kind === 'transcribing';
   return (
-    <StepFrame onBack={onBack} hideNext>
+    <StepFrame onBack={onBack} hideNext extra={<Button variant="plain" size="large" onClick={onNext}>Skip for now</Button>}>
       <h1>Try it</h1>
       <p className="onb-lead">Hold {keycapsFor(binding)} and say something.</p>
       <textarea className="onb-textarea" autoFocus rows={5} aria-label="Dictation test area" placeholder="Your words will appear here" />
