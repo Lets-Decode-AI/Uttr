@@ -7,6 +7,7 @@ import Icon from '../components/ui/Icon';
 import IconButton from '../components/ui/IconButton';
 import { keycapsFor } from '../components/ui/Keycap';
 import SearchField from '../components/ui/SearchField';
+import Switch from '../components/ui/Switch';
 import { dayLabel, errMsg, fmtClock } from '../lib/format';
 import { useEvent } from '../lib/hooks';
 import { useBinding } from '../lib/useBinding';
@@ -37,10 +38,16 @@ export default function History() {
   const [loaded, setLoaded] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [open, setOpen] = useState<number | null>(null);
+  const [app, setApp] = useState('');
+  const [apps, setApps] = useState<string[]>([]);
+  const [original, setOriginal] = useState(false);
   const busy = useRef(false);
   const gen = useRef(0);
   const sentinel = useRef<HTMLDivElement>(null);
   const q = query.trim() || undefined;
+  const appFilter = app || undefined;
+
+  useEffect(() => { api.recentApps().then(setApps, () => {}); }, []);
 
   useEffect(() => {
     const t = setTimeout(() => setQuery(input), 300);
@@ -51,7 +58,7 @@ export default function History() {
   useEffect(() => {
     const g = ++gen.current;
     busy.current = true;
-    api.historyList(0, q).then(
+    api.historyList(0, q, appFilter).then(
       (r) => {
         if (g !== gen.current) return;
         setItems(r);
@@ -65,7 +72,7 @@ export default function History() {
         toast(errMsg(e), 'error');
       },
     );
-  }, [q, toast]);
+  }, [q, appFilter, toast]);
 
   const loadMore = useCallback(async () => {
     if (busy.current || !hasMore) return;
@@ -74,7 +81,7 @@ export default function History() {
     try {
       // Page by how much we hold, not by a page counter: local deletes shift server offsets.
       // Re-fetching an overlapping page is safe because rows are deduped by id.
-      const r = await api.historyList(Math.floor(items.length / PAGE_SIZE), q);
+      const r = await api.historyList(Math.floor(items.length / PAGE_SIZE), q, appFilter);
       if (g !== gen.current) return;
       const fresh = r.filter((n) => !items.some((o) => o.id === n.id));
       setItems((x) => [...x, ...fresh.filter((n) => !x.some((o) => o.id === n.id))]);
@@ -84,7 +91,7 @@ export default function History() {
     } finally {
       if (g === gen.current) busy.current = false;
     }
-  }, [hasMore, items, q, toast]);
+  }, [hasMore, items, q, appFilter, toast]);
 
   useEffect(() => {
     const el = sentinel.current;
@@ -98,7 +105,7 @@ export default function History() {
   useEvent('transcriptAdded', async () => {
     const g = gen.current;
     try {
-      const r = await api.historyList(0, q);
+      const r = await api.historyList(0, q, appFilter);
       if (g !== gen.current) return;
       setItems((x) => {
         const fresh = r.filter((n) => !x.some((o) => o.id === n.id));
@@ -132,11 +139,18 @@ export default function History() {
         <h1>History</h1>
         <SearchField label="Search dictations" value={input} onChange={setInput} />
       </header>
+      <div className="hist-tools">
+        <select className="ui-select" aria-label="Filter by app" value={app} onChange={(e) => setApp(e.target.value)}>
+          <option value="">All apps</option>
+          {apps.map((a) => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <label className="hist-toggle">Show original<Switch label="Show original" checked={original} onChange={setOriginal} /></label>
+      </div>
       {loaded && items.length === 0 && (
         <div className="empty">
           <span className="empty-icon" aria-hidden="true"><Icon name={q ? 'search' : 'mic'} size={28} /></span>
-          <div className="empty-title">{q ? 'No results' : 'No dictations yet'}</div>
-          <p className="muted">{q ? 'Try a different search.' : <>Hold {keycapsFor(binding)} in any app to start.</>}</p>
+          <div className="empty-title">{q || appFilter ? 'No results' : 'No dictations yet'}</div>
+          <p className="muted">{q || appFilter ? 'Try a different search or app.' : <>Hold {keycapsFor(binding)} in any app to start.</>}</p>
         </div>
       )}
       {groupByDay(items).map((g) => (
@@ -147,6 +161,7 @@ export default function History() {
                 <button type="button" className={`hist-text selectable${open === t.id ? ' hist-open' : ''}`} aria-expanded={open === t.id} onClick={() => setOpen(open === t.id ? null : t.id)}>
                   {t.text}
                 </button>
+                {original && t.rawText.trim() !== t.text.trim() && <span className="hist-raw selectable"><span className="hist-raw-tag">Original</span>{t.rawText}</span>}
                 <span className="hist-meta">{metaLine(t)}</span>
               </span>
               <span className="hist-actions">

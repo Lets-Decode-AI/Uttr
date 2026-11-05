@@ -12,6 +12,7 @@ pub mod models;
 pub mod permissions;
 mod postprocess;
 mod snippets;
+pub mod stats;
 pub mod store;
 pub mod stt;
 pub mod style;
@@ -516,6 +517,23 @@ fn init_backend(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     });
     tracing::info!("dictation controller started");
 
+    // Keep history within its limit: now, then hourly.
+    {
+        let store = store.clone();
+        let settings = settings_arc.clone();
+        std::thread::Builder::new()
+            .name("uttr-retention".into())
+            .spawn(move || {
+                loop {
+                    let days = settings
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .history_retention_days;
+                    commands::apply_retention(&store, days);
+                    std::thread::sleep(std::time::Duration::from_secs(3600));
+                }
+            })?;
+    }
     let onboarded = settings.onboarded;
     let show_flowbar = settings.show_flowbar;
     app.manage(AppState {
@@ -605,6 +623,7 @@ pub fn run() {
             commands::ai_key_set,
             commands::ai_try,
             commands::openrouter_models,
+            commands::stats,
             commands::snippet_list,
             commands::snippet_add,
             commands::snippet_update,

@@ -138,6 +138,20 @@ export interface DictEntry {
   term: string;
   replacement: string | null;
 }
+export interface Stats {
+  totalWords: number;
+  dictations: number;
+  speakingMs: number;
+  /** Words per minute while speaking. */
+  avgWpm: number;
+  currentStreak: number;
+  longestStreak: number;
+  /** Minutes saved against typing at 40 WPM. */
+  timeSavedMin: number;
+  /** Last 30 local days, oldest first. */
+  days: { date: string; words: number }[];
+  topApps: { app: string; words: number }[];
+}
 export interface Snippet {
   id: number;
   trigger: string;
@@ -190,7 +204,9 @@ export const api = {
   modelDelete: (id: string) => invoke<void>('model_delete', { id }),
   modelSetActive: (id: string) => invoke<void>('model_set_active', { id }),
 
-  historyList: (page: number, query?: string) => invoke<Transcript[]>('history_list', { page, query }),
+  historyList: (page: number, query?: string, app?: string) => invoke<Transcript[]>('history_list', { page, query, app }),
+  /** Home dashboard numbers; pass `new Date().getTimezoneOffset()`. */
+  stats: (offsetMin: number) => invoke<Stats>('stats', { offsetMin }),
   historyDelete: (id: number) => invoke<void>('history_delete', { id }),
 
   settingsGet: () => invoke<Settings>('settings_get'),

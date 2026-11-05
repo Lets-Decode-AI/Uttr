@@ -6,6 +6,7 @@ import { useToast } from '../components/Toasts';
 import Button from '../components/ui/Button';
 import Group from '../components/ui/Group';
 import IconButton from '../components/ui/IconButton';
+import InfoTip from '../components/ui/InfoTip';
 import { keycapsFor } from '../components/ui/Keycap';
 import Row from '../components/ui/Row';
 import Segmented from '../components/ui/Segmented';
@@ -14,9 +15,14 @@ import { errMsg } from '../lib/format';
 import { isWindows } from '../lib/platform';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { useSettings } from '../lib/useSettings';
+import { navigate } from '../lib/hooks';
+import { startTour } from '../lib/tour';
 
 const THEMES: { value: ThemePref; label: string }[] = [{ value: 'system', label: 'System' }, { value: 'light', label: 'Light' }, { value: 'dark', label: 'Dark' }];
 const IDLE: [string, number | null][] = [['After 5 minutes', 5], ['After 10 minutes', 10], ['After 30 minutes', 30], ['Never', null]];
+const KEEP: [string, number | null][] = [['Forever', null], ['90 days', 90], ['30 days', 30], ['7 days', 7]];
+/** A row label with an explanation behind an "i". */
+const tip = (label: string, text: string) => <span className="label-tip">{label}<InfoTip text={text} /></span>;
 
 export default function Settings() {
   const { s, error, save } = useSettings();
@@ -52,14 +58,14 @@ export default function Settings() {
           accessory={<MicPicker value={s.mic} onChange={(mic) => save({ mic })} />}
         />
         <Row
-          label="Show Flow Bar" detail="The small pill at the bottom of the screen."
+          label={tip('Show Flow Bar', 'The Flow Bar shows when uttr is listening, transcribing or done, and shows errors. It never takes focus or clicks.')} detail="The small pill at the bottom of the screen."
           accessory={<Switch label="Show Flow Bar" checked={s.showFlowbar} onChange={(showFlowbar) => save({ showFlowbar })} />}
         />
       </Group>
 
       <Group title="Model" footer="Unloading the model frees memory. The next dictation loads it again.">
         <Row
-          label="Unload when idle"
+          label={tip('Unload when idle', 'After this long without dictation, the speech model is removed from memory. The next dictation loads it again, which takes a second or two.')}
           accessory={
             <select className="ui-select" aria-label="Unload when idle" value={String(s.idleUnloadMin)} onChange={(e) => save({ idleUnloadMin: e.target.value === 'null' ? null : Number(e.target.value) })}>
               {IDLE.map(([l, v]) => <option key={l} value={String(v)}>{l}</option>)}
@@ -67,7 +73,7 @@ export default function Settings() {
           }
         />
         <Row
-          label="Load at startup" detail="Makes the first dictation faster and uses more memory."
+          label={tip('Load at startup', 'Loads the speech model as soon as uttr opens, so your first dictation is instant. It then uses memory until the idle timeout unloads it.')} detail="Makes the first dictation faster and uses more memory."
           accessory={<Switch label="Load at startup" checked={s.preload} onChange={(preload) => save({ preload })} />}
         />
       </Group>
@@ -77,8 +83,23 @@ export default function Settings() {
         <Appearance />
       </Group>
 
+      <Group title="History" footer="Older dictations are deleted automatically. Your stats on Home only count what is kept.">
+        <Row
+          label={tip('Keep history', 'Dictations are stored only on this computer. Choose a limit if you would rather not keep them.')}
+          accessory={
+            <select className="ui-select" aria-label="Keep history" value={String(s.historyRetentionDays)} onChange={(e) => save({ historyRetentionDays: e.target.value === 'null' ? null : Number(e.target.value) })}>
+              {KEEP.map(([l, v]) => <option key={l} value={String(v)}>{l}</option>)}
+            </select>
+          }
+        />
+      </Group>
+
       <Dictionary />
       <HfToken />
+      <Group title="Help">
+        <Row label="Tour" detail="A quick walk through every page of uttr." accessory={<Button onClick={startTour}>Take the tour</Button>} />
+        <Row label="Setup" detail="Go through the first-run setup again." accessory={<Button onClick={() => navigate('/onboarding')}>Run setup</Button>} />
+      </Group>
       <Troubleshooting />
     </div>
   );

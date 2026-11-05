@@ -4,8 +4,8 @@ import { useEvent } from '../lib/hooks';
 import Icon, { type IconName } from './ui/Icon';
 import Logo from './ui/Logo';
 
-// Part 3 adds a "Home" dashboard entry above History; until then History is the landing page.
 const NAV: { label: string; route: string; icon: IconName }[] = [
+  { label: 'Home', route: '/home', icon: 'home' },
   { label: 'History', route: '/history', icon: 'history' },
   { label: 'Snippets', route: '/snippets', icon: 'snippet' },
   { label: 'Style', route: '/style', icon: 'style' },

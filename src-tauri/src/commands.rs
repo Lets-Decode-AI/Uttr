@@ -228,6 +228,9 @@ pub fn apply_settings(app: &AppHandle, st: &AppState, new: Settings) -> Result<(
         st.stt.set_idle_unload(new.idle_unload());
         st.local_llm.set_idle_unload(new.idle_unload());
     }
+    if new.history_retention_days != old.history_retention_days {
+        apply_retention(&st.store, new.history_retention_days);
+    }
     if new.show_flowbar != old.show_flowbar {
         set_flowbar_visible(app, new.show_flowbar);
     }
@@ -399,10 +402,35 @@ pub fn history_list(
     st: State<'_, AppState>,
     page: u32,
     query: Option<String>,
+    app: Option<String>,
 ) -> Result<Vec<Transcript>, String> {
     st.store
-        .list_transcripts(page, HISTORY_PAGE_SIZE, query.as_deref())
+        .list_transcripts_in(page, HISTORY_PAGE_SIZE, query.as_deref(), app.as_deref())
         .map_err(err)
+}
+
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as i64)
+}
+
+/// Home dashboard numbers. `offset_min` is the UI's `Date.getTimezoneOffset()`.
+#[tauri::command(async)]
+pub fn stats(st: State<'_, AppState>, offset_min: i32) -> Result<crate::stats::Stats, String> {
+    let rows = st.store.stats_rows().map_err(err)?;
+    Ok(crate::stats::compute(&rows, now_ms(), offset_min))
+}
+
+/// Deletes history older than the "Keep history" setting allows.
+pub fn apply_retention(store: &crate::store::Store, days: Option<u32>) {
+    if let Some(cutoff) = crate::stats::retention_cutoff(now_ms(), days) {
+        match store.purge_transcripts_before(cutoff) {
+            Ok(0) => {}
+            Ok(n) => tracing::info!("removed {n} dictations older than {days:?} days"),
+            Err(e) => tracing::warn!("could not apply the history limit: {e:#}"),
+        }
+    }
 }
 
 #[tauri::command(async)]
