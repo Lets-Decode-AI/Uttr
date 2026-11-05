@@ -88,8 +88,10 @@ impl Respond for Whisperish {
         let len = u32::from_le_bytes(body[riff + 40..riff + 44].try_into().unwrap()) as usize;
         let pcm = &body[riff + 44..riff + 44 + len];
         let samples: Vec<f32> = pcm
-            .chunks_exact(2)
-            .map(|b| f32::from(i16::from_le_bytes([b[0], b[1]])) / 32768.0)
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| f32::from(i16::from_le_bytes(*b)) / 32768.0)
             .collect();
         self.requests.fetch_add(1, Ordering::SeqCst);
         let out = self
