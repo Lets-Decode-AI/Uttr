@@ -58,6 +58,16 @@ jobs:
         working-directory: src-tauri
         run: cargo test
 
+      # Wayland shortcuts: the real portal backend against a stand-in GlobalShortcuts portal
+      # on a private D-Bus session (no compositor on CI).
+      - name: Wayland portal over D-Bus
+        working-directory: src-tauri
+        env:
+          FAKE_PORTAL_LOG: /tmp/uttr-fake-portal.json
+        run: |
+          sudo apt-get install -y python3-dbus python3-gi
+          dbus-run-session -- sh -c 'python3 ../scripts/fake_portal.py & sleep 2; cargo test --test portal_integration -- --ignored --nocapture'
+
       - name: tsc
         run: npx tsc --noEmit && npx tsc -p tsconfig.test.json --noEmit
 
@@ -73,7 +83,7 @@ jobs:
       matrix:
         include:
           - name: macOS arm64
-            os: macos-14
+            os: macos-15
             target: aarch64-apple-darwin
             bundles: dmg
           # macos-13 was retired by GitHub; macos-15-intel is the x86_64 runner.
