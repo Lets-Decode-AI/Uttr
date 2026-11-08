@@ -84,3 +84,23 @@ describe('ui primitives', () => {
     expect(document.activeElement).toBe(trigger);
   });
 });
+
+describe('shortcut presets per platform', () => {
+  it('hides Fn presets off macOS and names keys for each platform', async () => {
+    const { presetsFor } = await import('../components/HotkeyInput');
+    const presets = [
+      { label: 'Fn', keys: ['Fn' as const] },
+      { label: 'Right ⌥', keys: ['AltRight' as const] },
+      { label: 'Ctrl+Win/⌘', keys: ['ControlLeft' as const, 'MetaLeft' as const] },
+    ];
+    expect(presetsFor(presets, 'mac').map((p) => p.label)).toEqual(['Fn', 'Right ⌥', 'Ctrl+⌘']);
+    expect(presetsFor(presets, 'other').map((p) => p.label)).toEqual(['Right Alt', 'Ctrl+Win']);
+    expect(presetsFor(presets, 'linux').map((p) => p.label)).toEqual(['Right Alt', 'Ctrl+Super']);
+  });
+
+  it('shows Super for the Win key on Linux', () => {
+    const { container, unmount } = render(<>{keycapsFor({ keys: ['ControlLeft', 'MetaLeft'] }, 'linux')}</>);
+    expect(container.textContent).toBe('CtrlSuper');
+    unmount();
+  });
+});

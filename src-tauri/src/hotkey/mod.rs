@@ -7,7 +7,7 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc::Sender,
 };
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub mod gesture;
 #[cfg(target_os = "macos")]
@@ -83,6 +83,27 @@ pub fn default_command_binding() -> Binding {
     #[cfg(not(target_os = "macos"))]
     keys.push(Key::AltLeft);
     Binding { keys }
+}
+
+/// Until when key events are ignored because uttr itself is typing (synthetic paste/copy).
+static SYNTHETIC_UNTIL: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Ignore key events for `d` from now: uttr is about to send synthetic keys (Ctrl+V), which a
+/// low-level hook sees like real ones.
+pub fn suppress_for(d: Duration) {
+    let until = Instant::now() + d;
+    let mut slot = SYNTHETIC_UNTIL.lock().unwrap_or_else(|p| p.into_inner());
+    if slot.is_none_or(|u| u < until) {
+        *slot = Some(until);
+    }
+}
+
+/// Whether key events are currently being ignored (see [`suppress_for`]).
+pub fn suppressed() -> bool {
+    SYNTHETIC_UNTIL
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .is_some_and(|u| Instant::now() < u)
 }
 
 /// Tracks which keys are down and reports chord transitions.
@@ -179,7 +200,29 @@ impl Core {
         }
     }
 
+    /// A key outside both chords. Pressing it while a chord is held means the user is typing a
+    /// system shortcut (Ctrl+Win+Right, Win+Shift+S, fn+Delete...), not dictating: the
+    /// recording is cancelled and the chord's release is ignored.
+    pub fn other_key(&mut self, down: bool) {
+        if down && self.held() {
+            self.gesture.abort();
+            self.emit([HotkeyEvent::Cancel]);
+        }
+    }
+
+    fn in_a_binding(&self, key: Key) -> bool {
+        self.chord.binding.keys.contains(&key)
+            || self
+                .command
+                .as_ref()
+                .is_some_and(|c| c.binding.keys.contains(&key))
+    }
+
     pub fn handle(&mut self, key: Key, down: bool) {
+        if key != Key::Escape && !self.in_a_binding(key) {
+            self.other_key(down);
+            return;
+        }
         if key == Key::Escape && !self.chord.binding.keys.contains(&Key::Escape) {
             let first_down = down && !std::mem::replace(&mut self.esc_down, true);
             if !down {
@@ -558,7 +601,8 @@ mod tests {
     }
 
     #[test]
-    fn without_a_command_binding_extra_keys_change_nothing() {
+    fn another_key_while_the_chord_is_held_cancels_and_swallows_the_release() {
+        // Ctrl+Win+Right (switch desktop), fn+Down (page down): a system shortcut, not dictation.
         let (tx, rx) = std::sync::mpsc::channel();
         let mut core = Core::new(
             Binding {
@@ -569,8 +613,48 @@ mod tests {
         core.handle(Key::Fn, true);
         core.handle(Key::ControlLeft, true);
         core.handle(Key::Fn, false);
+        core.handle(Key::ControlLeft, false);
         let got: Vec<_> = rx.try_iter().collect();
-        assert_eq!(got, vec![HotkeyEvent::Pressed, HotkeyEvent::Released]);
+        assert_eq!(got, vec![HotkeyEvent::Pressed, HotkeyEvent::Cancel]);
+
+        // An unmapped key (arrow, letter) does the same.
+        core.handle(Key::Fn, true);
+        core.other_key(true);
+        core.other_key(false);
+        core.handle(Key::Fn, false);
+        let got: Vec<_> = rx.try_iter().collect();
+        assert_eq!(got, vec![HotkeyEvent::Pressed, HotkeyEvent::Cancel]);
+
+        // Keys typed while the chord is not held change nothing.
+        core.other_key(true);
+        core.handle(Key::ShiftLeft, true);
+        assert_eq!(rx.try_iter().count(), 0);
+    }
+
+    #[test]
+    fn an_aborted_press_does_not_start_a_double_tap() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let mut core = Core::new(default_binding(), tx);
+        let keys = default_binding().keys;
+        for k in &keys {
+            core.handle(*k, true);
+        }
+        core.other_key(true);
+        for k in &keys {
+            core.handle(*k, false);
+        }
+        for k in &keys {
+            core.handle(*k, true);
+        }
+        let got: Vec<_> = rx.try_iter().collect();
+        assert_eq!(
+            got,
+            vec![
+                HotkeyEvent::Pressed,
+                HotkeyEvent::Cancel,
+                HotkeyEvent::Pressed
+            ]
+        );
     }
 
     #[test]

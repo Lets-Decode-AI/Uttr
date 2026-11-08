@@ -292,6 +292,32 @@ pub fn restart_app(app: tauri::AppHandle) {
     app.restart();
 }
 
+// ---- updates -------------------------------------------------------------------------------
+
+#[tauri::command]
+pub fn app_version(app: tauri::AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+/// The update found by the last check (background or manual), if any.
+#[tauri::command]
+pub fn update_pending(app: tauri::AppHandle) -> Option<crate::updater::UpdateInfo> {
+    crate::updater::pending(&app)
+}
+
+#[tauri::command]
+pub async fn update_check(
+    app: tauri::AppHandle,
+) -> Result<Option<crate::updater::UpdateInfo>, String> {
+    crate::updater::check(&app).await
+}
+
+/// Downloads and installs the pending update, then restarts uttr. User data is kept.
+#[tauri::command]
+pub async fn update_install(app: tauri::AppHandle) -> Result<(), String> {
+    crate::updater::install(&app).await
+}
+
 // ---- models --------------------------------------------------------------------------------
 
 #[tauri::command]

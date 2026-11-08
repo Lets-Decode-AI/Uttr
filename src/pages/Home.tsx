@@ -29,22 +29,40 @@ function Tile({ label, short, value, hint, icon }: { label: string; short: strin
   return (
     <div className="home-tile" role="group" aria-label={label}>
       <span className="home-tile-head"><Icon name={icon} size={14} /><span className="home-tile-label" aria-hidden="true">{short}</span><InfoTip text={hint} /></span>
-      <span className="home-tile-value">{value}</span>
+      <span className="home-tile-value"><Value text={value} /></span>
     </div>
   );
 }
+
+/** Numbers at full size, units ("WPM", "days", "h") small and quiet. */
+function Value({ text }: { text: string }) {
+  return <>{text.split(/(\d[\d,.]*)/).filter(Boolean).map((part, i) => (/^\d/.test(part) ? <span key={i}>{part}</span> : <small key={i}>{part.trim() ? part : ' '}</small>))}</>;
+}
+
+const shortDate = (iso: string) => new Date(`${iso}T12:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 function Chart({ days }: { days: Stats['days'] }) {
   const max = Math.max(1, ...days.map((d) => d.words));
   const total = days.reduce((n, d) => n + d.words, 0);
   return (
+    <section className="ui-group home-chart-card">
+      <div className="home-chart-head">
+        <h2>Last 30 days</h2>
+        <span className="home-chart-total">{total.toLocaleString()}<small>words</small></span>
+      </div>
+      <div className="ui-row home-chart-row">
     <div className="home-chart" role="img" aria-label={`Words per day, last 30 days: ${total.toLocaleString()} words in total`}>
       {days.map((d) => (
-        <span key={d.date} className="home-bar-slot" title={`${new Date(`${d.date}T12:00`).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}: ${d.words.toLocaleString()} words`}>
+        <span key={d.date} className="home-bar-slot" title={`${shortDate(d.date)}: ${d.words.toLocaleString()} words`}>
           <span data-testid="bar" className={`home-bar${d.words ? '' : ' home-bar-empty'}`} style={{ height: `${Math.max(4, (d.words / max) * 100)}%` }} />
         </span>
       ))}
     </div>
+        {days.length > 1 && (
+          <div className="home-chart-axis" aria-hidden="true"><span>{shortDate(days[0].date)}</span><span>Today</span></div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -118,7 +136,8 @@ export default function Home() {
     <div className="page">
       <header className="page-head page-head-row">
         <div>
-          <h1>{greeting()}</h1>
+          <p className="home-eyebrow">{greeting()}</p>
+          <h1>Your dictation</h1>
           {settings && <p className="muted home-sub">Hold {keycapsFor(settings.hotkey)} in any app and start talking.</p>}
         </div>
         <Button onClick={startTour}><Icon name="sparkle" size={14} />Take the tour</Button>
@@ -142,12 +161,12 @@ export default function Home() {
             <Tile label="Day streak" short="Streak" icon="history" value={`${stats.currentStreak} ${stats.currentStreak === 1 ? 'day' : 'days'}`} hint={`Days in a row with a dictation. Your longest: ${stats.longestStreak}.`} />
             <Tile label="Time saved" short="Time saved" icon="check" value={fmtMinutes(stats.timeSavedMin)} hint="Compared with typing the same words at 40 words per minute." />
           </div>
-          <Group title="Last 30 days"><div className="ui-row home-chart-row"><Chart days={stats.days} /></div></Group>
+          <Chart days={stats.days} />
           <div className="home-columns">
             <Group title="Top apps">
               {stats.topApps.length === 0 && <div className="ui-row muted">No app names yet.</div>}
               {stats.topApps.map((t) => (
-                <div key={t.app} className="ui-row"><span className="ui-row-text"><span className="ui-row-label">{t.app}</span></span><span className="ui-row-accessory muted">{t.words.toLocaleString()} words</span></div>
+                <div key={t.app} className="ui-row"><span className="ui-row-text"><span className="ui-row-label">{t.app}</span></span><span className="ui-row-accessory home-app-words">{t.words.toLocaleString()} words</span></div>
               ))}
             </Group>
             <Group title="Recent" footer={<a href="#/history">See all history</a>}>

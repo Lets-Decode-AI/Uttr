@@ -316,6 +316,13 @@ impl Store {
         Ok(())
     }
 
+    /// Forget a model's download state (after it was cancelled or deleted).
+    pub fn downloads_clear(&self, model_id: &str) -> Result<()> {
+        self.lock()?
+            .execute("DELETE FROM downloads WHERE model_id = ?1", [model_id])?;
+        Ok(())
+    }
+
     pub fn downloads_for(&self, model_id: &str) -> Result<Vec<DownloadRow>> {
         let conn = self.lock()?;
         let mut stmt = conn.prepare(

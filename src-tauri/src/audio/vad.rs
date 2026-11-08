@@ -5,8 +5,10 @@ use std::collections::VecDeque;
 use super::{FRAME_LEN, SAMPLE_RATE};
 
 /// Floor on the speech threshold (RMS). Laptop mics pick up normal speech at about 0.02 and
-/// the end of a sentence at a third of that, so a higher floor drops trailing words.
-const MIN_THRESHOLD: f32 = 0.004;
+/// the end of a sentence at a third of that, so a higher floor drops trailing words. Quiet
+/// mics (input volume turned down, no boost) deliver speech at an RMS of 0.002 to 0.004, so
+/// the floor sits below that and the noise-floor rule (`FLOOR_MULTIPLIER`) does the rest.
+const MIN_THRESHOLD: f32 = 0.0015;
 /// Threshold = noise floor x this factor (when above `MIN_THRESHOLD`).
 const FLOOR_MULTIPLIER: f32 = 3.0;
 /// Initial noise-floor estimate before any audio has been seen.

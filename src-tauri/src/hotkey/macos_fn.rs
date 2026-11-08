@@ -56,6 +56,10 @@ fn modifier_states(flags: u64) -> Vec<(Key, bool)> {
     v
 }
 
+/// kVK_Function and the Globe key's usage code.
+const KC_FUNCTION: i64 = 63;
+const KC_GLOBE: i64 = 179;
+
 fn from_keycode(keycode: i64) -> Option<Key> {
     match keycode {
         KC_ESCAPE => Some(Key::Escape),
@@ -95,6 +99,9 @@ fn run(
             if cb_stopped.load(Ordering::Relaxed) {
                 return CallbackResult::Keep;
             }
+            if super::suppressed() {
+                return CallbackResult::Keep;
+            }
             let keycode = event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
             let mapped = match etype {
                 CGEventType::FlagsChanged => {
@@ -104,7 +111,17 @@ fn run(
                     }
                     None
                 }
-                CGEventType::KeyDown => from_keycode(keycode).map(|k| (k, true)),
+                CGEventType::KeyDown => match from_keycode(keycode) {
+                    Some(k) => Some((k, true)),
+                    // Any other key (arrows, Delete, letters) while the chord is held: a
+                    // system shortcut such as fn+Down, not dictation. The fn/Globe key itself
+                    // can arrive as a key event on some keyboards and is not "another key".
+                    None if !matches!(keycode, KC_FUNCTION | KC_GLOBE) => {
+                        super::lock(&cb_core).other_key(true);
+                        None
+                    }
+                    None => None,
+                },
                 CGEventType::KeyUp => from_keycode(keycode).map(|k| (k, false)),
                 // The system disabled the tap; key-ups may have been missed.
                 CGEventType::TapDisabledByTimeout | CGEventType::TapDisabledByUserInput => {

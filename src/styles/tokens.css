@@ -1,32 +1,60 @@
-/* Design tokens: the uttr palette (forest #274B40, warm cream #F3F0E8), radii, type and motion.
+/* Design tokens. Brand: forest #274B40 (oklch hue ~168). Neutrals are soft and faintly tinted toward
+   forest. Three surface levels: canvas (window, sidebar) < sheet (the content panel) < card.
+   "Ink" is the filled selected / primary colour: deep forest on light, pale mint on dark.
    Light by default; src/lib/theme.ts sets data-theme="dark" on <html> for the dark palette. */
 :root {
   color-scheme: light;
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font: "Hanken Grotesk Variable", "Segoe UI Variable Text", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --font-display: "Urbanist Variable", "Hanken Grotesk Variable", "Segoe UI Variable Display", -apple-system, system-ui, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", SFMono-Regular, Menlo, monospace;
 
   --forest: #274B40;
   --cream: #F3F0E8;
 
-  --accent: var(--forest);
-  --green: #3D7A57;
-  --red: #B5473A;
-  --orange: #B87428;
-  --accent-tint: rgba(39, 75, 64, 0.12);
-  --accent-fg: var(--cream);
+  --canvas: oklch(0.928 0.009 168);
+  --sheet: oklch(0.968 0.0045 168);
+  --card: oklch(0.993 0.0018 168);
+  --ink: oklch(0.262 0.036 168);
+  --ink-fg: oklch(0.972 0.01 95);
 
-  --window-bg: var(--cream);
-  --surface: #FBFAF6;
-  --label: #1E2A25;
-  --label-secondary: rgba(30, 42, 37, 0.62);
-  --separator: rgba(39, 75, 64, 0.16);
-  --fill: rgba(39, 75, 64, 0.08);
-  --sidebar-bg: #E9E5DA;
-  --sidebar-tint: rgba(233, 229, 218, 0.6);
-  --focus-ring: rgba(39, 75, 64, 0.35);
+  --accent: oklch(0.385 0.052 168);
+  --accent-tint: oklch(0.385 0.052 168 / 0.1);
+  --accent-fg: var(--ink-fg);
+  --green: oklch(0.56 0.11 155);
+  --red: oklch(0.55 0.15 30);
+  --orange: oklch(0.6 0.12 65);
 
-  --radius-group: 10px;
-  --radius-control: 6px;
+  --window-bg: var(--sheet);
+  --surface: var(--card);
+  --label: oklch(0.235 0.02 168);
+  --label-secondary: oklch(0.47 0.016 168);
+  --label-tertiary: oklch(0.6 0.013 168);
+  --separator: oklch(0.38 0.04 168 / 0.12);
+  --hairline: oklch(0.38 0.04 168 / 0.1);
+  --fill: oklch(0.38 0.04 168 / 0.06);
+  --fill-strong: oklch(0.38 0.04 168 / 0.11);
+  --sidebar-bg: var(--canvas);
+  --sidebar-tint: oklch(0.928 0.009 168 / 0.55);
+  --focus-ring: oklch(0.385 0.052 168 / 0.32);
+  --scrim: oklch(0.18 0.02 168 / 0.42);
+
+  --shadow-card: 0 1px 2px oklch(0.3 0.03 168 / 0.04), 0 10px 28px -16px oklch(0.3 0.03 168 / 0.14);
+  --shadow-float: 0 2px 6px oklch(0.2 0.03 168 / 0.08), 0 18px 44px -12px oklch(0.2 0.03 168 / 0.28);
+  --shadow-sheet: 0 0 0 1px var(--hairline), 0 1px 3px oklch(0.3 0.03 168 / 0.05);
+
+  --radius-sheet: 22px;
+  --radius-card: 18px;
+  --radius-group: 18px;
+  --radius-field: 10px;
+  --radius-control: 10px;
   --radius-pill: 999px;
+
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 24px;
+  --space-2xl: 32px;
 
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --dur: 180ms;
@@ -34,20 +62,30 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --accent: #8DB8A6;
-  --green: #7CC29A;
-  --red: #E07A68;
-  --orange: #E0A35A;
-  --accent-tint: rgba(141, 184, 166, 0.18);
-  --accent-fg: #12201B;
+  --canvas: oklch(0.158 0.011 168);
+  --sheet: oklch(0.197 0.013 168);
+  --card: oklch(0.235 0.015 168);
+  --ink: oklch(0.86 0.072 160);
+  --ink-fg: oklch(0.2 0.03 168);
 
-  --window-bg: #121A17;
-  --surface: #1B2622;
-  --label: var(--cream);
-  --label-secondary: rgba(243, 240, 232, 0.6);
-  --separator: rgba(243, 240, 232, 0.12);
-  --fill: rgba(243, 240, 232, 0.08);
-  --sidebar-bg: #16201C;
-  --sidebar-tint: rgba(22, 32, 28, 0.6);
-  --focus-ring: rgba(141, 184, 166, 0.45);
+  --accent: oklch(0.8 0.07 162);
+  --accent-tint: oklch(0.8 0.07 162 / 0.14);
+  --green: oklch(0.78 0.11 155);
+  --red: oklch(0.72 0.13 30);
+  --orange: oklch(0.8 0.11 72);
+
+  --label: oklch(0.955 0.008 95);
+  --label-secondary: oklch(0.74 0.013 168);
+  --label-tertiary: oklch(0.6 0.013 168);
+  --separator: oklch(0.95 0.01 168 / 0.09);
+  --hairline: oklch(0.95 0.01 168 / 0.075);
+  --fill: oklch(0.95 0.01 168 / 0.055);
+  --fill-strong: oklch(0.95 0.01 168 / 0.1);
+  --sidebar-tint: oklch(0.158 0.011 168 / 0.55);
+  --focus-ring: oklch(0.8 0.07 162 / 0.4);
+  --scrim: oklch(0.08 0.01 168 / 0.6);
+
+  --shadow-card: 0 1px 2px oklch(0 0 0 / 0.2), 0 10px 28px -16px oklch(0 0 0 / 0.5);
+  --shadow-float: 0 2px 6px oklch(0 0 0 / 0.3), 0 18px 44px -12px oklch(0 0 0 / 0.6);
+  --shadow-sheet: 0 0 0 1px var(--hairline), 0 1px 3px oklch(0 0 0 / 0.25);
 }

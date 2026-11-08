@@ -122,6 +122,8 @@ pub struct Ai {
     keys: Keys,
     http: reqwest::Client,
     anthropic_base: String,
+    /// The last "can't run" reason reported by AI cleanup. Reported once, not on every dictation.
+    warned_not_ready: Mutex<Option<String>>,
 }
 
 impl Ai {
@@ -136,6 +138,7 @@ impl Ai {
                 .build()
                 .unwrap_or_default(),
             anthropic_base: cloud::ANTHROPIC_URL.into(),
+            warned_not_ready: Mutex::new(None),
         }
     }
 
@@ -241,6 +244,22 @@ impl TextAi for Ai {
         {
             return Ok(None);
         }
+        let s = self.settings();
+        if let Some(why) = self.not_ready(&s) {
+            let mut warned = self
+                .warned_not_ready
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            if warned.as_deref() == Some(why.as_str()) {
+                return Ok(None);
+            }
+            *warned = Some(why.clone());
+            return Err(why);
+        }
+        *self
+            .warned_not_ready
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = None;
         let out = self.complete(prompt::cleanup(text, style, keep))?;
         if prompt::plausible_cleanup(text, &out) {
             Ok(Some(out))

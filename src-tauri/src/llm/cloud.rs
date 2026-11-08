@@ -49,6 +49,29 @@ async fn post(req: reqwest::RequestBuilder) -> Result<Value, String> {
     serde_json::from_str(&body).map_err(|e| format!("Unexpected reply from the provider: {e}"))
 }
 
+/// Returned when the provider stopped at its token limit: the text is incomplete, so it must not
+/// replace the transcript or the selection.
+pub const TRUNCATED: &str = "The AI's answer was cut off before it finished.";
+
+/// Whether `model` accepts `output_config.effort`. Claude Sonnet 4.5, Haiku 4.5 and older models
+/// reject the request when it is sent.
+pub fn supports_effort(model: &str) -> bool {
+    let m = model.to_ascii_lowercase();
+    let old = [
+        "claude-3",
+        "haiku-4",
+        "sonnet-4-5",
+        "sonnet-4-0",
+        "opus-4-0",
+        "opus-4-1",
+    ];
+    let undated_4 = ["claude-sonnet-4", "claude-opus-4"];
+    !(old.iter().any(|o| m.contains(o))
+        || undated_4.contains(&m.as_str())
+        || m.starts_with("claude-sonnet-4-2")
+        || m.starts_with("claude-opus-4-2"))
+}
+
 /// `base` is the API root including `/v1` (for example `http://localhost:11434/v1`).
 pub async fn openai(
     http: &reqwest::Client,
@@ -75,6 +98,12 @@ pub async fn openai(
         req = req.bearer_auth(k);
     }
     let v = post(req).await?;
+    if v.pointer("/choices/0/finish_reason")
+        .and_then(Value::as_str)
+        == Some("length")
+    {
+        return Err(TRUNCATED.into());
+    }
     v.pointer("/choices/0/message/content")
         .and_then(Value::as_str)
         .map(str::to_string)
@@ -90,22 +119,26 @@ pub async fn anthropic(
     p: &Prompt,
 ) -> Result<String, String> {
     let url = format!("{}/v1/messages", base.trim_end_matches('/'));
-    let body = json!({
+    let mut body = json!({
         "model": model,
         "max_tokens": p.max_tokens.max(1024),
-        // Short rewrites: keep latency down.
-        "output_config": { "effort": "low" },
         "system": p.system,
         "messages": [{ "role": "user", "content": p.user }],
     });
+    if supports_effort(model) {
+        // Short rewrites: keep latency down.
+        body["output_config"] = json!({ "effort": "low" });
+    }
     let req = http
         .post(url)
         .header("x-api-key", key)
         .header("anthropic-version", ANTHROPIC_VERSION)
         .json(&body);
     let v = post(req).await?;
-    if v.get("stop_reason").and_then(Value::as_str) == Some("refusal") {
-        return Err("The model declined this request.".into());
+    match v.get("stop_reason").and_then(Value::as_str) {
+        Some("refusal") => return Err("The model declined this request.".into()),
+        Some("max_tokens") => return Err(TRUNCATED.into()),
+        _ => {}
     }
     let text: String = v
         .get("content")

@@ -30,6 +30,8 @@ impl EnigoKeystroke {
             ..Settings::default()
         };
         let mut enigo = Enigo::new(&settings).map_err(|e| anyhow!("enigo init: {e}"))?;
+        // The hotkey hook sees synthetic keys like real ones; keep it from reacting to them.
+        crate::hotkey::suppress_for(SYNTHETIC_WINDOW);
         enigo
             .key(MODIFIER, Direction::Press)
             .map_err(|e| anyhow!("modifier press: {e}"))?;
@@ -37,8 +39,46 @@ impl EnigoKeystroke {
         // Always release the modifier, even if the key click failed.
         let released = enigo.key(MODIFIER, Direction::Release);
         clicked.map_err(|e| anyhow!("{key} click: {e}"))?;
+        crate::hotkey::suppress_for(SYNTHETIC_WINDOW);
         released.map_err(|e| anyhow!("modifier release: {e}"))?;
         Ok(())
+    }
+}
+
+/// How long the hotkey hook ignores keys around a synthetic keystroke.
+const SYNTHETIC_WINDOW: Duration = Duration::from_millis(150);
+
+/// Longest wait for the user to let go of the shortcut's modifiers before a synthetic paste.
+const MODIFIERS_UP_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// Waits (up to [`MODIFIERS_UP_TIMEOUT`]) until Win, Alt and Shift are physically up. The paste
+/// can be ready while the user still holds part of the shortcut (Ctrl released first, or the
+/// press that stops hands-free mode); Ctrl+V sent then arrives as Ctrl+Win+V or Ctrl+Alt+V,
+/// which the app does not treat as paste. Windows and X11 only; elsewhere this returns at once.
+fn wait_for_modifiers_up() {
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        use crate::hotkey::{Key as K, physical::is_down};
+        #[cfg(target_os = "linux")]
+        if crate::insert::is_wayland() {
+            return;
+        }
+        const KEYS: [K; 6] = [
+            K::MetaLeft,
+            K::MetaRight,
+            K::AltLeft,
+            K::AltRight,
+            K::ShiftLeft,
+            K::ShiftRight,
+        ];
+        let deadline = std::time::Instant::now() + MODIFIERS_UP_TIMEOUT;
+        while KEYS.iter().any(|k| is_down(*k)) {
+            if std::time::Instant::now() >= deadline {
+                tracing::debug!("modifiers still held; pasting anyway");
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 }
 
@@ -80,6 +120,8 @@ impl<K: Keystroke + Send + Sync + 'static> MainThreadKeystroke<K> {
 
 impl<K: Keystroke + Send + Sync + 'static> MainThreadKeystroke<K> {
     fn on_main(&self, f: fn(&K) -> Result<()>) -> Result<()> {
+        // Off the main thread: the wait can take a moment.
+        wait_for_modifiers_up();
         let (tx, rx) = mpsc::channel();
         let inner = self.inner.clone();
         (self.runner)(Box::new(move || {

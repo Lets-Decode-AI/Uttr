@@ -47,8 +47,12 @@ pub fn start(core: Arc<Mutex<Core>>, stopped: Arc<AtomicBool>) -> Result<(), Hot
                     rdev::EventType::KeyRelease(k) => (k, false),
                     _ => return,
                 };
-                if let Some(key) = map(key) {
-                    super::lock(&core).handle(key, down);
+                if super::suppressed() {
+                    return;
+                }
+                match map(key) {
+                    Some(key) => super::lock(&core).handle(key, down),
+                    None => super::lock(&core).other_key(down),
                 }
             })
             .map_err(|e| format!("{e:?}"))

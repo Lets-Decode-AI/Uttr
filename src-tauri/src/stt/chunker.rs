@@ -29,7 +29,7 @@ impl Default for ChunkerConfig {
     fn default() -> Self {
         Self {
             min_secs: 4.0,
-            pause_ms: 300,
+            pause_ms: 450,
             max_secs: 15.0,
             search_back_secs: 3.0,
         }
@@ -192,18 +192,86 @@ impl ChunkPlanner {
     }
 }
 
-/// Joins chunk texts with single spaces. A chunk that continues a sentence (the previous text did
-/// not end in `.`, `?` or `!`) has its first letter lower-cased unless it starts an acronym.
+/// Words a speech model writes, in brackets or parentheses, for audio that has no speech
+/// (Whisper's `[ Silence ]`, `[BLANK_AUDIO]`, `(music)`, ...).
+const NON_SPEECH: &[&str] = &[
+    "silence",
+    "blank_audio",
+    "blank audio",
+    "no speech",
+    "music",
+    "applause",
+    "laughter",
+    "laughs",
+    "laughing",
+    "inaudible",
+    "noise",
+    "background noise",
+    "static",
+    "wind",
+    "cough",
+    "coughs",
+    "coughing",
+    "sigh",
+    "sighs",
+    "breathing",
+    "clears throat",
+    "typing",
+    "clicking",
+    "beep",
+    "pause",
+    "unintelligible",
+    "indistinct",
+];
+
+/// Removes non-speech markers from one chunk's text: every `[...]` span, `(...)` spans that name a
+/// sound (see [`NON_SPEECH`]), and music notes. Returns the remainder with single spaces.
+pub fn strip_non_speech(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(['[', '(']) {
+        let close = if rest.as_bytes()[i] == b'[' { ']' } else { ')' };
+        let Some(len) = rest[i + 1..].find(close) else {
+            break;
+        };
+        let inner = rest[i + 1..i + 1 + len]
+            .trim()
+            .trim_end_matches('.')
+            .to_lowercase();
+        let drop = close == ']' || NON_SPEECH.contains(&inner.as_str());
+        out.push_str(&rest[..i]);
+        if !drop {
+            out.push_str(&rest[i..i + len + 2]);
+        }
+        rest = &rest[i + len + 2..];
+    }
+    out.push_str(rest);
+    let out = out.replace(['\u{266a}', '\u{266b}'], " ");
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Joins chunk texts with single spaces, after removing non-speech markers. A chunk that continues
+/// a sentence has its first letter lower-cased unless it starts an acronym. A chunk that starts in
+/// lower case continues the previous one, so the period the model put at the previous chunk's end
+/// (every chunk ends at a pause) is dropped.
 pub fn join_chunks(texts: &[String]) -> String {
     let mut out = String::new();
-    for t in texts.iter().map(|t| t.trim()).filter(|t| !t.is_empty()) {
+    for t in texts
+        .iter()
+        .map(|t| strip_non_speech(t))
+        .filter(|t| !t.is_empty())
+    {
+        let t = t.as_str();
         if out.is_empty() {
             out.push_str(t);
             continue;
         }
-        let ends_sentence = out.ends_with(['.', '?', '!']);
         let mut chars = t.chars();
         let first = chars.next().unwrap();
+        if first.is_lowercase() && out.ends_with('.') && !out.ends_with("..") {
+            out.pop();
+        }
+        let ends_sentence = out.ends_with(['.', '?', '!']);
         out.push(' ');
         let continues = !ends_sentence
             && first.is_uppercase()
@@ -276,17 +344,25 @@ mod tests {
     #[test]
     fn chunker_cuts_at_pause_after_min() {
         let mut p = ChunkPlanner::new(ChunkerConfig::default());
-        let audio = [voiced(5.0), silence(0.4), voiced(3.0)].concat();
+        let audio = [voiced(5.0), silence(0.6), voiced(3.0)].concat();
         let chunks = run(&mut p, &audio);
         assert_eq!(chunks.len(), 1);
         let c = &chunks[0];
         assert!(c.has_speech);
         assert_eq!(c.start_ms, 0);
-        // cut lands inside the 5.0..5.4 s pause, at its middle for the 300 ms detection point
+        // cut lands inside the 5.0..5.6 s pause, at its middle for the 450 ms detection point
         let len = secs(c.samples.len());
-        assert!((5.1..=5.3).contains(&len), "chunk is {len} s");
+        assert!((5.1..=5.4).contains(&len), "chunk is {len} s");
         let tail = p.finish().unwrap();
         assert!(tail.start_ms as f32 / 1000.0 >= len);
+    }
+
+    #[test]
+    fn a_short_breath_does_not_cut_a_chunk() {
+        // 300 ms is a comma or a breath, not the end of a thought.
+        let mut p = ChunkPlanner::new(ChunkerConfig::default());
+        let audio = [voiced(5.0), silence(0.3), voiced(3.0)].concat();
+        assert!(run(&mut p, &audio).is_empty());
     }
 
     #[test]
@@ -379,5 +455,34 @@ mod tests {
         assert_eq!(j(&[" a ", "", "  ", "I know"]), "a I know");
         assert_eq!(j(&["Really?", "Yes", "so"]), "Really? Yes so");
         assert_eq!(j(&[]), "");
+    }
+
+    #[test]
+    fn join_chunks_drops_the_period_before_a_lowercase_continuation() {
+        let j = |v: &[&str]| join_chunks(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(
+            j(&["A Workspace account on it.", "based on which I made it."]),
+            "A Workspace account on it based on which I made it."
+        );
+        assert_eq!(j(&["Wait...", "then go"]), "Wait... then go");
+        assert_eq!(j(&["Is it?", "yes"]), "Is it? yes");
+        assert_eq!(j(&["It is.", "Then go"]), "It is. Then go");
+    }
+
+    #[test]
+    fn non_speech_markers_are_removed() {
+        assert_eq!(strip_non_speech("[ Silence ]"), "");
+        assert_eq!(strip_non_speech("[BLANK_AUDIO]"), "");
+        assert_eq!(strip_non_speech("(music) \u{266a}"), "");
+        assert_eq!(strip_non_speech("(Silence.)"), "");
+        assert_eq!(strip_non_speech("Hello [Music] world"), "Hello world");
+        assert_eq!(
+            strip_non_speech("Call me (maybe) later"),
+            "Call me (maybe) later"
+        );
+        assert_eq!(strip_non_speech("open (paren"), "open (paren");
+        let j = |v: &[&str]| join_chunks(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(j(&["[ Silence ]"]), "");
+        assert_eq!(j(&["Hello.", "[BLANK_AUDIO]", "Bye."]), "Hello. Bye.");
     }
 }

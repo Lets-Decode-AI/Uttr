@@ -9,3 +9,7 @@ pub const TRANSCRIPT_ADDED: &str = "history://added";
 pub const SETTINGS_CHANGED: &str = "settings://changed";
 /// The active model changed outside the Models page (tray menu); the page should re-fetch.
 pub const MODELS_CHANGED: &str = "models://changed";
+/// Payload: `updater::UpdateInfo`. A newer release is available.
+pub const UPDATE_AVAILABLE: &str = "app://update-available";
+/// Payload: `updater::UpdateProgress` while an update downloads and installs.
+pub const UPDATE_PROGRESS: &str = "app://update-progress";

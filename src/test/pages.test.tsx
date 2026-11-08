@@ -239,7 +239,7 @@ describe('Settings', () => {
   it('settings_groups_follow_system_settings_layout', async () => {
     render(<Settings />);
     await flush();
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Dictation', 'Model', 'General', 'History', 'Personal dictionary', 'Hugging Face', 'Help', 'Troubleshooting']);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Dictation', 'Model', 'General', 'History', 'Personal dictionary', 'Hugging Face', 'Help', 'About and updates', 'Troubleshooting']);
     expect(screen.getByRole('switch', { name: 'Show Flow Bar' })).toBeTruthy();
     expect(screen.getByRole('switch', { name: 'Load at startup' })).toBeTruthy();
     expect(screen.getByRole('switch', { name: 'Open at login' })).toBeTruthy();
@@ -284,7 +284,7 @@ describe('Settings', () => {
     render(<Settings />);
     await flush();
     fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Right ⌥' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Right Alt' }));
     await flush();
     expect(a.settingsSet).toHaveBeenCalledWith({ ...settings, hotkey: { keys: ['AltRight'] } });
   });
@@ -318,7 +318,7 @@ describe('Settings', () => {
     render(<Settings />);
     await flush();
     fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Right ⌥' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Right Alt' }));
     await flush();
     expect(screen.getByRole('alert').textContent).toContain('invalid binding');
     expect(screen.getByRole('group', { name: 'Current shortcut' }).textContent).toMatch(/^fn$/i);

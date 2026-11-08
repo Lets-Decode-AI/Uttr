@@ -242,6 +242,27 @@ pub fn validate_settings(s: &Settings) -> Result<(), String> {
     if same(&s.hotkey, &s.command_hotkey) {
         return Err("Command Mode needs a different shortcut from dictation.".into());
     }
+    if s.command_hotkey
+        .keys
+        .iter()
+        .all(|k| s.hotkey.keys.contains(k))
+    {
+        return Err(
+            "The Command Mode shortcut can't be part of the dictation shortcut, or every dictation would become a command."
+                .into(),
+        );
+    }
+    for b in [&s.hotkey, &s.command_hotkey] {
+        if b.keys.iter().all(|k| *k == crate::hotkey::Key::Space) {
+            return Err("Space on its own can't be a shortcut: you type it all the time.".into());
+        }
+        #[cfg(not(target_os = "macos"))]
+        if b.keys.contains(&crate::hotkey::Key::Fn) {
+            return Err(
+                "The Fn key can't be used for shortcuts on this computer. Pick other keys.".into(),
+            );
+        }
+    }
     if s.ai_provider == AiProvider::OpenAi
         && !(s.openai_base_url.starts_with("https://") || s.openai_base_url.starts_with("http://"))
     {

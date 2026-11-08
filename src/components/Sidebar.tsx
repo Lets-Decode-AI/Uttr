@@ -3,6 +3,7 @@ import { api, type DictationState } from '../ipc';
 import { useEvent } from '../lib/hooks';
 import Icon, { type IconName } from './ui/Icon';
 import Logo from './ui/Logo';
+import UpdateCard from './UpdateCard';
 
 const NAV: { label: string; route: string; icon: IconName }[] = [
   { label: 'Home', route: '/home', icon: 'home' },
@@ -37,6 +38,7 @@ export default function Sidebar({ route }: { route: string }) {
           <a key={n.label} href={`#${n.route}`} data-tour={n.route.slice(1)} className={`nav${route === n.route ? ' nav-on' : ''}`} aria-current={route === n.route ? 'page' : undefined}><Icon name={n.icon} />{n.label}</a>
         ))}
       </nav>
+      <UpdateCard />
       <div className="side-status" data-tour="status" aria-live="polite"><span className={`status-dot${state.kind !== 'idle' ? ` status-${state.kind}` : ''}`} />{statusText(state)}</div>
     </aside>
   );

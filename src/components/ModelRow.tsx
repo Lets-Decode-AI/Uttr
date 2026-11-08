@@ -40,7 +40,7 @@ export default function ModelRow(p: ModelRowProps) {
           <span className="model-progress">
             <ProgressBar value={pct} label={`${p.name} download`} />
             <span className="ui-row-detail">
-              {st === 'Verifying' ? 'Verifying' : paused ? 'Paused' : st === 'Queued' ? 'Waiting to start' : `${fmtBytes(p.progress.bytesDone)} of ${fmtBytes(p.progress.total)} · ${fmtBytes(p.progress.bytesPerSec)}/s ${fmtEta(p.progress.etaSecs)}`}
+              {st === 'Verifying' ? 'Verifying' : paused ? (p.progress.error ? `Paused: ${p.progress.error}` : 'Paused') : st === 'Queued' ? 'Waiting to start' : `${fmtBytes(p.progress.bytesDone)} of ${fmtBytes(p.progress.total)} · ${fmtBytes(p.progress.bytesPerSec)}/s ${fmtEta(p.progress.etaSecs)}`}
             </span>
           </span>
         )}

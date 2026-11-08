@@ -57,13 +57,16 @@ models from Hugging Face inside the app.
 - Low resource use. uttr stays in the tray at rest, and the model unloads after an idle timeout (10 minutes by default, or never).
 - Optional Hugging Face token for gated or private repos, stored in the system keychain.
 - Open at login, microphone selection and a configurable shortcut.
+- **In-app updates**: when a new version is released, uttr shows an **Update and restart** button. Updates are
+  signature-checked and keep your settings, history, snippets and models.
 
 ## Privacy
 
 - Audio is processed on your device and is never uploaded; there is no account and no telemetry.
 - The microphone stays open for up to 15 s after a dictation so the next one does not clip the first word. While it is open, only the latest 0.3 s of audio is held in memory.
   After 15 s it closes.
-- The only network traffic is model downloads and searches on Hugging Face, which you start yourself.
+- Network traffic is limited to model downloads and searches on Hugging Face, which you start yourself, and an update
+  check against GitHub Releases (a download of `latest.json`) at launch and every 6 hours. It sends no data about you.
 - AI is off by default. On-device AI keeps your text on your computer. If you choose OpenAI, Anthropic or OpenRouter,
   the dictated **text** (never the audio) is sent to that provider, and your API key is stored in the system keychain.
 - Speech runs on your computer unless you switch to **Cloud (your key)** on the Models page. Then the **audio** of each

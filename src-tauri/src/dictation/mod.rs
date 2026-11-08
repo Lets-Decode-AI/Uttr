@@ -562,6 +562,8 @@ impl Controller {
             }
             Msg::Finalized { seq, res, silent } => {
                 let res = match res {
+                    // Only non-speech markers (e.g. Whisper's "[ Silence ]") were heard.
+                    Ok(Some(text)) if text.trim().is_empty() => SlotRes::NoSpeech { silent },
                     Ok(Some(text)) => SlotRes::Text(text),
                     Ok(None) => SlotRes::NoSpeech { silent },
                     Err(e) => SlotRes::Stt(e),
@@ -891,7 +893,9 @@ impl Controller {
         if job.text.is_empty() {
             return;
         }
-        let words = job.text.split_whitespace().count() as i64;
+        // Words spoken, not inserted: snippet expansions, AI rewrites and Command Mode answers
+        // would otherwise count as dictated words and inflate the speed.
+        let words = job.raw.split_whitespace().count() as i64;
         let duration_ms = job.meta.duration_ms as i64;
         let wpm = if duration_ms > 0 {
             words as f64 / (duration_ms as f64 / 60_000.0)
