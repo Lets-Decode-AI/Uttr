@@ -39,12 +39,12 @@ folder, and API keys in the system keychain, so they carry over.
 
 | Target | Runner | Bundles |
 |---|---|---|
-| `aarch64-apple-darwin` | `macos-14` | `.dmg` |
+| `aarch64-apple-darwin` | `macos-15` | `.dmg` |
 | `x86_64-apple-darwin` | `macos-15-intel` | `.dmg` |
 | `x86_64-pc-windows-msvc` | `windows-latest` | NSIS `-setup.exe` |
 | `x86_64-unknown-linux-gnu` | `ubuntu-22.04` | `.AppImage`, `.deb` |
 
-GitHub retired `macos-13`, so the Intel build uses `macos-15-intel`.
+GitHub retired `macos-13` and `macos-14`: the Apple Silicon build uses `macos-15` and the Intel build `macos-15-intel`.
 
 ## Signing secrets (Apple optional, updater required)
 
