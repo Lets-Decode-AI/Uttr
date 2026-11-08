@@ -90,6 +90,7 @@ try {
 } catch { /* storage unavailable */ }
 
 mockIPC((cmd, args) => {
+  if (cmd === 'app_version') return '0.4.0';
   if (cmd === 'history_list') return (args as { page: number }).page === 0 ? history : [];
   return replies[cmd] ?? null;
 }, { shouldMockEvents: true });

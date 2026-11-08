@@ -239,7 +239,7 @@ describe('Settings', () => {
   it('settings_groups_follow_system_settings_layout', async () => {
     render(<Settings />);
     await flush();
-    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Dictation', 'Model', 'General', 'History', 'Personal dictionary', 'Hugging Face', 'Help', 'Troubleshooting']);
+    expect(screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent)).toEqual(['Dictation', 'Model', 'General', 'History', 'Personal dictionary', 'Hugging Face', 'Help', 'About and updates', 'Troubleshooting']);
     expect(screen.getByRole('switch', { name: 'Show Flow Bar' })).toBeTruthy();
     expect(screen.getByRole('switch', { name: 'Load at startup' })).toBeTruthy();
     expect(screen.getByRole('switch', { name: 'Open at login' })).toBeTruthy();

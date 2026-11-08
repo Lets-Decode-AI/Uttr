@@ -17,6 +17,7 @@ pub mod store;
 pub mod stt;
 pub mod style;
 pub mod tray;
+pub mod updater;
 
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -302,9 +303,10 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open uttr", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause", "Pause dictation", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let update = updater::new_tray_item(app)?;
     let models_menu = Submenu::with_id(app, "models", "Active model", true)?;
     app.manage(tray::ModelsMenu(models_menu.clone()));
-    let menu = Menu::with_items(app, &[&open, &models_menu, &pause, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &models_menu, &pause, &update, &quit])?;
     tray::refresh_models_menu(app);
     if let Some(st) = app.try_state::<app_state::AppState>() {
         *st.pause_item.lock().unwrap_or_else(|p| p.into_inner()) = Some(pause.clone());
@@ -325,6 +327,7 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                     commands::apply_paused(&st, paused);
                 }
             }
+            updater::TRAY_ITEM => on_update_item(app),
             "quit" => app.exit(0),
             other => {
                 if let Some(id) = tray::model_id_from_item(other) {
@@ -337,6 +340,30 @@ fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     }
     builder.build(app)?;
     Ok(())
+}
+
+/// Tray "Check for updates…" / "Install update…": shows the update in the main window, checking
+/// first when nothing is known yet.
+fn on_update_item(app: &AppHandle) {
+    const ROUTE: Option<&str> = Some("/settings");
+    if updater::pending(app).is_some() {
+        if let Err(e) = open_main_window(app, ROUTE) {
+            tracing::warn!("could not open the main window: {e}");
+        }
+        return;
+    }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        match updater::check(&app).await {
+            Ok(Some(_)) => {
+                if let Err(e) = open_main_window(&app, ROUTE) {
+                    tracing::warn!("could not open the main window: {e}");
+                }
+            }
+            Ok(None) => commands::toast(&app, "info", "uttr is up to date."),
+            Err(e) => commands::toast(&app, "error", &e),
+        }
+    });
 }
 
 /// Opens the store, builds every subsystem and registers `AppState`.
@@ -589,6 +616,8 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![LOGIN_ARG]),
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::Updates::default())
         .invoke_handler(tauri::generate_handler![
             commands::get_state,
             commands::set_paused,
@@ -629,6 +658,10 @@ pub fn run() {
             commands::snippet_update,
             commands::snippet_delete,
             commands::recent_apps,
+            commands::app_version,
+            commands::update_pending,
+            commands::update_check,
+            commands::update_install,
         ])
         .setup(|app| {
             logging::init(app.path().app_log_dir().ok().as_deref());
@@ -636,6 +669,7 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
             init_backend(app)?;
             build_tray(app.handle())?;
+            updater::spawn_background_checks(app.handle());
             position_flowbar(app.handle())?;
             if let Some(w) = app.get_webview_window("flowbar") {
                 // Click-through: the pill never steals clicks or focus.

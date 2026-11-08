@@ -173,6 +173,18 @@ export interface RouterModel {
   inputPerM: number | null;
   outputPerM: number | null;
 }
+export interface UpdateInfo {
+  version: string;
+  current: string;
+  notes?: string | null;
+}
+export interface UpdateProgress {
+  downloaded: number;
+  total?: number | null;
+  /** The download finished and the installer is running. */
+  installing: boolean;
+}
+
 export interface Toast {
   level: 'info' | 'warning' | 'error' | string;
   message: string;
@@ -188,6 +200,13 @@ export const api = {
   openPermissionSettings: (kind: PermKind) => invoke<void>('open_permission_settings', { kind }),
   requestMicrophone: () => invoke<void>('request_microphone'),
   restartApp: () => invoke<void>('restart_app'),
+
+  appVersion: () => invoke<string>('app_version'),
+  /** The update found by the last check, if any. */
+  updatePending: () => invoke<UpdateInfo | null>('update_pending'),
+  updateCheck: () => invoke<UpdateInfo | null>('update_check'),
+  /** Downloads and installs the pending update, then restarts uttr. */
+  updateInstall: () => invoke<void>('update_install'),
 
   catalog: () => invoke<CatalogEntry[]>('catalog'),
   installed: () => invoke<InstalledModelDto[]>('installed'),
@@ -247,6 +266,8 @@ export const EVENTS = {
   transcriptAdded: 'history://added',
   settingsChanged: 'settings://changed',
   modelsChanged: 'models://changed',
+  updateAvailable: 'app://update-available',
+  updateProgress: 'app://update-progress',
 } as const;
 
 export interface EventPayloads {
@@ -259,6 +280,8 @@ export interface EventPayloads {
   settingsChanged: Settings;
   /** The active model changed outside the Models page (tray). */
   modelsChanged: null;
+  updateAvailable: UpdateInfo;
+  updateProgress: UpdateProgress;
 }
 
 /** Subscribe to a backend event; resolves to the unlisten function. */

@@ -15,6 +15,7 @@ import { errMsg } from '../lib/format';
 import { isWindows } from '../lib/platform';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { useSettings } from '../lib/useSettings';
+import { useUpdate } from '../lib/useUpdate';
 import { navigate } from '../lib/hooks';
 import { startTour } from '../lib/tour';
 
@@ -100,8 +101,38 @@ export default function Settings() {
         <Row label="Tour" detail="A quick walk through every page of uttr." accessory={<Button onClick={startTour}>Take the tour</Button>} />
         <Row label="Setup" detail="Go through the first-run setup again." accessory={<Button onClick={() => navigate('/onboarding')}>Run setup</Button>} />
       </Group>
+      <About />
       <Troubleshooting />
     </div>
+  );
+}
+
+function About() {
+  const u = useUpdate();
+  const [version, setVersion] = useState('');
+  useEffect(() => { Promise.resolve().then(api.appVersion).then(setVersion, () => {}); }, []);
+  const status =
+    u.phase === 'checking' ? 'Checking for updates…'
+      : u.phase === 'upToDate' ? 'You have the latest version.'
+        : u.phase === 'available' && u.info ? `Version ${u.info.version} is available.`
+          : u.phase === 'downloading' ? `Downloading version ${u.info?.version ?? ''}…`
+            : u.phase === 'installing' ? 'Installing. uttr restarts when it is done.'
+              : 'uttr checks for updates automatically.';
+  return (
+    <Group title="About and updates" footer="Updates replace only the app. Your settings, history, snippets, models and keys stay on this computer and are kept.">
+      <Row
+        label={version ? `uttr ${version}` : 'uttr'}
+        detail={u.error ? <span className="ui-row-error">{u.error}</span> : status}
+        accessory={
+          u.phase === 'available'
+            ? <Button variant="primary" onClick={u.install}>Update and restart</Button>
+            : <Button disabled={['checking', 'downloading', 'installing'].includes(u.phase)} onClick={u.check}>Check for updates</Button>
+        }
+      />
+      {u.phase === 'available' && u.info?.notes && (
+        <div className="ui-row update-notes"><span className="ui-row-text"><span className="ui-row-detail selectable">{u.info.notes}</span></span></div>
+      )}
+    </Group>
   );
 }
 
