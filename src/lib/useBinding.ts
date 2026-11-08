@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, type Binding, type Settings } from '../ipc';
+import { currentPlatform } from '../components/ui/Keycap';
 
-const DEFAULT: Binding = { keys: ['Fn'] };
+/** Shown until the settings load: the backend's default for this platform. */
+const defaultBinding = (): Binding =>
+  currentPlatform() === 'mac' ? { keys: ['Fn'] } : { keys: ['ControlLeft', 'MetaLeft'] };
 
 /** The saved dictation hotkey, with a setter that persists it. */
 export function useBinding(onError?: (e: unknown) => void) {
@@ -19,5 +22,5 @@ export function useBinding(onError?: (e: unknown) => void) {
       onError?.(e);
     }
   }, [settings, onError]);
-  return { binding: settings?.hotkey ?? DEFAULT, save };
+  return { binding: settings?.hotkey ?? defaultBinding(), save };
 }

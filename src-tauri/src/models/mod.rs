@@ -279,6 +279,9 @@ impl Manager {
         let dir = self.model_dir(id);
         if !dir.join(MANIFEST).exists() {
             let _ = std::fs::remove_dir_all(&dir);
+            if let Err(e) = self.store.downloads_clear(id) {
+                tracing::warn!("could not clear the download state of {id}: {e:#}");
+            }
         }
     }
 
@@ -289,6 +292,9 @@ impl Manager {
         let dir = self.model_dir(id);
         if dir.exists() {
             std::fs::remove_dir_all(&dir)?;
+        }
+        if let Err(e) = self.store.downloads_clear(id) {
+            tracing::warn!("could not clear the download state of {id}: {e:#}");
         }
         if self
             .store

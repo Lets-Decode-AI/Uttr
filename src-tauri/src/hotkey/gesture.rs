@@ -22,6 +22,15 @@ impl GestureDetector {
         Self::default()
     }
 
+    /// The current press was turned into something else (another key joined the chord): its
+    /// release is silent and it cannot start a double-tap.
+    pub fn abort(&mut self) {
+        if self.down_at.is_some() {
+            self.swallow_up = true;
+        }
+        self.last_short_up = None;
+    }
+
     /// Feed a chord transition (`down == true` for chord-down).
     pub fn on_key(&mut self, down: bool, at: Instant) -> Vec<HotkeyEvent> {
         if down {

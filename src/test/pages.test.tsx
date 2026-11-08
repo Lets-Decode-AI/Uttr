@@ -284,7 +284,7 @@ describe('Settings', () => {
     render(<Settings />);
     await flush();
     fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Right ⌥' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Right Alt' }));
     await flush();
     expect(a.settingsSet).toHaveBeenCalledWith({ ...settings, hotkey: { keys: ['AltRight'] } });
   });
@@ -318,7 +318,7 @@ describe('Settings', () => {
     render(<Settings />);
     await flush();
     fireEvent.click(screen.getByRole('button', { name: /^change$/i }));
-    fireEvent.click(screen.getByRole('button', { name: 'Right ⌥' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Right Alt' }));
     await flush();
     expect(screen.getByRole('alert').textContent).toContain('invalid binding');
     expect(screen.getByRole('group', { name: 'Current shortcut' }).textContent).toMatch(/^fn$/i);

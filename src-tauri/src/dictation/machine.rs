@@ -22,7 +22,7 @@ pub const ERROR_SHOWN_FOR: Duration = Duration::from_secs(2);
 pub const MIC_DENIED: &str = "Microphone access is turned off.";
 
 /// Shown when a recording had sound but no speech.
-pub const NO_SPEECH: &str = "Didn't catch that. Try again.";
+pub const NO_SPEECH: &str = "Didn't catch that. Try again, a little closer to the mic.";
 
 /// Shown when the microphone delivered only silence (muted, wrong device, or blocked by the OS).
 #[cfg(target_os = "windows")]

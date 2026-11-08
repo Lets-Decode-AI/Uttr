@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Binding, Key } from '../ipc';
 import Button from './ui/Button';
+import { currentPlatform } from './ui/Keycap';
 
 const CODE_TO_KEY: Record<string, Key> = {
   ControlLeft: 'ControlLeft', ControlRight: 'ControlRight', MetaLeft: 'MetaLeft', MetaRight: 'MetaRight',
@@ -14,6 +15,21 @@ const PRESETS: HotkeyPreset[] = [
   { label: 'Right ⌥', keys: ['AltRight'] },
   { label: 'Ctrl+Win/⌘', keys: ['ControlLeft', 'MetaLeft'] },
 ];
+
+/** The Fn key only reaches apps on macOS, so presets that use it are hidden elsewhere. Linux
+ *  calls the Win key Super. */
+export function presetsFor(presets: HotkeyPreset[], platform = currentPlatform()): HotkeyPreset[] {
+  return presets
+    .filter((p) => platform === 'mac' || !p.keys.includes('Fn'))
+    .map((p) => ({ ...p, label: localLabel(p.label, platform) }));
+}
+
+/** "Ctrl+Win/⌘" becomes "Ctrl+⌘" on a Mac, "Ctrl+Win" on Windows and "Ctrl+Super" on Linux. */
+function localLabel(label: string, platform: ReturnType<typeof currentPlatform>): string {
+  if (platform === 'mac') return label.replace('Win/⌘', '⌘');
+  const named = label.replace('Win/⌘', 'Win').replace(/⌥/g, 'Alt').replace(/⇧/g, 'Shift');
+  return platform === 'linux' ? named.replace('Win', 'Super') : named;
+}
 
 const same = (a: Binding, b: Key[]) => a.keys.length === b.length && b.every((k) => a.keys.includes(k));
 
@@ -57,7 +73,7 @@ export default function HotkeyInput({ value, onChange, presets = PRESETS }: { va
   return (
     <div className="hotkey">
       <div className="hotkey-choices" role="group" aria-label="Shortcut choices">
-        {presets.map((p) => (
+        {presetsFor(presets).map((p) => (
           <Button key={p.label} aria-pressed={same(value, p.keys)} onClick={() => { setRecording(false); onChange({ keys: p.keys }); }}>
             {p.label}
           </Button>

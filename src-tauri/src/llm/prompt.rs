@@ -101,16 +101,28 @@ pub fn tidy(out: &str) -> String {
     s
 }
 
-/// A cleanup result is used only when it looks like a cleaned version of the input: not empty
-/// and not much longer (a model that answers the transcript instead of cleaning it writes more).
+/// A cleanup result is used only when it looks like a cleaned version of the input: not empty,
+/// not much longer (a model that answers the transcript instead of cleaning it writes more), and
+/// for longer dictations not much shorter (a reply cut off at the token limit, or a summary).
+/// Removing filler words and false starts rarely drops more than a third of the text.
 pub fn plausible_cleanup(input: &str, output: &str) -> bool {
     let (i, o) = (input.chars().count(), output.chars().count());
-    o > 0 && o <= i * 3 / 2 + 40
+    let long_enough_to_judge = i >= 200;
+    o > 0 && o <= i * 3 / 2 + 40 && !(long_enough_to_judge && o < i * 2 / 5)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_much_shorter_cleanup_of_a_long_dictation_is_rejected() {
+        let long = "word ".repeat(100);
+        assert!(plausible_cleanup(&long, &"word ".repeat(70)));
+        assert!(!plausible_cleanup(&long, &"word ".repeat(20)));
+        // Short dictations can shrink a lot ("um so yeah okay" -> "Okay.").
+        assert!(plausible_cleanup("um so yeah okay", "Okay."));
+    }
 
     #[test]
     fn cleanup_prompt_carries_style_and_vocabulary() {

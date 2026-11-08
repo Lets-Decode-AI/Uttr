@@ -117,7 +117,7 @@ describe('AI page', () => {
     await flush();
     expect(screen.queryByRole('button', { name: 'Clean up' })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Change' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Right ⌥+Right ⇧' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Right Alt+Right Shift' }));
     await flush();
     expect(lastSaved().commandHotkey).toEqual({ keys: ['AltRight', 'ShiftRight'] });
   });
