@@ -307,6 +307,15 @@ UTTR_MODEL_DIR="$HOME/Library/Caches/uttr Test é/parakeet-v2" \
 
 On Linux pass a destination directory to the script and use the same path for `UTTR_MODEL_DIR`.
 
+The BYOK speech test streams the fixtures through uttr's real cloud session to an OpenAI-compatible
+transcription server on localhost (backed by Parakeet), so it uses the same `UTTR_MODEL_DIR`:
+
+```bash
+cd src-tauri
+UTTR_MODEL_DIR="$HOME/Library/Caches/uttr Test é/parakeet-v2" \
+  cargo test --release --test byok_integration -- --ignored --nocapture
+```
+
 The on-device AI tests run real llama.cpp inference on any GGUF chat model (the recommended Qwen2.5 1.5B is ~1.1 GB):
 
 ```bash
