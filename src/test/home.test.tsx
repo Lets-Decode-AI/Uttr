@@ -50,9 +50,9 @@ describe('Home dashboard', () => {
     expect(a.stats).toHaveBeenCalledWith(new Date().getTimezoneOffset());
     const tile = (name: string) => screen.getByRole('group', { name });
     expect(within(tile('Words dictated')).getByText('12,345')).toBeTruthy();
-    expect(within(tile('Average speed')).getByText('137 WPM')).toBeTruthy();
-    expect(within(tile('Day streak')).getByText('3 days')).toBeTruthy();
-    expect(within(tile('Time saved')).getByText('3 h 39 min')).toBeTruthy();
+    expect(tile('Average speed').textContent).toContain('137 WPM');
+    expect(tile('Day streak').textContent).toContain('3 days');
+    expect(tile('Time saved').textContent).toContain('3 h 39 min');
   });
 
   it('charts_thirty_days_and_lists_top_apps', async () => {

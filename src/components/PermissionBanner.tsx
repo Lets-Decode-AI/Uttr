@@ -25,7 +25,7 @@ export default function PermissionBanner() {
     ? 'The shortcut is off because uttr does not have Accessibility access. Turn on uttr in Accessibility, then restart uttr.'
     : 'uttr cannot hear you because it does not have microphone access.';
   return (
-    <div role="alert" className="banner-error" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+    <div role="alert" className="banner-error" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
       <span style={{ flex: '1 1 260px' }}>{message}</span>
       {micMissing && (
         <Button onClick={() => attempt(() => (p.microphone === 'denied' ? api.openPermissionSettings('microphone') : api.requestMicrophone()))}>
