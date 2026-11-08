@@ -20,7 +20,7 @@ jobs:
     name: Lint and test (ubuntu)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install system dependencies
         run: |
@@ -35,7 +35,7 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -90,7 +90,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
             bundles: appimage,deb
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -107,7 +107,7 @@ jobs:
           workspaces: src-tauri
           key: ${{ matrix.target }}
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
@@ -116,12 +116,12 @@ jobs:
 
       # No tagName / releaseId: builds the bundles and does not publish anything.
       - name: Build with Tauri
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         with:
           args: --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
       - name: Upload installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: uttr-${{ matrix.target }}
           if-no-files-found: error
