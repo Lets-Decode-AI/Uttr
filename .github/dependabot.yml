@@ -14,6 +14,11 @@ updates:
     groups:
       npm-minor-patch:
         update-types: [minor, patch]
+    ignore:
+      # Tailwind only provides the CSS reset and one utility row (Flow Bar). v4 moves the PostCSS
+      # plugin to another package and changes the config format, which is not worth it here.
+      - dependency-name: tailwindcss
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:

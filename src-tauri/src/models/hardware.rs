@@ -12,12 +12,22 @@ pub struct Hardware {
 
 impl Hardware {
     pub fn detect() -> Hardware {
-        let mut sys = System::new();
-        sys.refresh_memory();
+        // sysinfo 0.40: `System::new` can fail (unsupported platform or no access to the
+        // memory counters). Then RAM is unknown (0), and model recommendations stay conservative.
+        let total_ram_gb = match System::new() {
+            Ok(mut sys) => {
+                sys.refresh_memory();
+                sys.total_memory() as f64 / (1024.0 * 1024.0 * 1024.0)
+            }
+            Err(e) => {
+                tracing::warn!("could not read the total memory: {e:?}");
+                0.0
+            }
+        };
         let arch = std::env::consts::ARCH.to_string();
         let apple_silicon = cfg!(target_os = "macos") && arch == "aarch64";
         Hardware {
-            total_ram_gb: sys.total_memory() as f64 / (1024.0 * 1024.0 * 1024.0),
+            total_ram_gb,
             cores: std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1),
