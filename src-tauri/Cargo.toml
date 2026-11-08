@@ -1,6 +1,6 @@
 [package]
 name = "uttr"
-version = "0.3.0"
+version = "0.4.0"
 description = "Local, private push-to-talk dictation powered by sherpa-onnx speech models"
 authors = ["Lets Decode AI contributors"]
 license = "MIT"
