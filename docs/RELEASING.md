@@ -7,9 +7,11 @@ auto-generated release notes attached. A maintainer reviews the draft and publis
 ## Steps
 
 1. Check that CI passes on `main`.
-2. Bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` (keep them equal), and run
-   `cargo check` in `src-tauri` so `Cargo.lock` updates. Commit as `chore: release vX.Y.Z`.
-3. Tag and push: `git tag vX.Y.Z && git push origin main vX.Y.Z`. A tag containing `-` (for example `v0.2.0-rc.1`) is marked as a pre-release.
+2. On a branch, bump the version in `package.json`, `src-tauri/Cargo.toml` and `src-tauri/tauri.conf.json` (keep them
+   equal), and run `cargo check` in `src-tauri` so `Cargo.lock` updates. Commit as `chore: release vX.Y.Z`, open a PR and
+   merge it once CI passes (`main` does not accept direct pushes).
+3. Tag the merge commit and push the tag: `git tag vX.Y.Z origin/main && git push origin vX.Y.Z`. A tag containing `-`
+   (for example `v0.2.0-rc.1`) is marked as a pre-release.
 4. Wait for the four matrix jobs (macOS arm64, macOS x64, Windows x64, Linux x64) to finish.
 5. Open the draft release and check the assets (two `.dmg` files, the NSIS `.exe`, the `.AppImage`, the `.deb`, the
    update bundles with their `.sig` files and `latest.json`) and the notes. Then publish.
@@ -35,6 +37,17 @@ folder, and API keys in the system keychain, so they carry over.
 - Linux: the AppImage and the `.deb` update in place. Other installs (built from source) do not update.
 - Versions before 0.4.0 have no updater; those users install 0.4.0 once by hand.
 
+## Who can merge and release
+
+- `main` is protected: changes land only through pull requests, all five CI jobs must pass, conversations must be
+  resolved, and only **LetsDecodeAI** and **RushilSharma09** can merge (admins included, no bypass). Force pushes and
+  deletion are blocked.
+- Release tags (`v*`) can be created, moved or deleted only by the `maitainers` team (the same two people), through the
+  "Release tags" ruleset. Pushing a tag is what starts a release.
+- The updater signing key is stored in the `release` environment, which only `v*` tag runs can use. Only people with
+  write access (the same two) can publish a draft release.
+- To add a maintainer: add them to the `maitainers` team, to the branch protection push list, and to `.github/CODEOWNERS`.
+
 ## Artifacts
 
 | Target | Runner | Bundles |
@@ -59,7 +72,7 @@ warning, and Windows SmartScreen may warn. Add the secrets under Settings > Secr
 | `APPLE_ID` | Apple ID used for notarization |
 | `APPLE_PASSWORD` | App-specific password for that Apple ID |
 | `APPLE_TEAM_ID` | Apple developer team ID |
-| `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater signing key (**required** for releases, see In-app updates) |
+| `TAURI_SIGNING_PRIVATE_KEY` | Tauri updater signing key (**required**, `release` environment secret, see In-app updates) |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | Password for that key (**required**) |
 
 Create the certificate value with `base64 -i certificate.p12 | pbcopy`. The workflow exports each variable only when
@@ -69,6 +82,6 @@ Windows code signing is not set up yet.
 
 ## Before the first release
 
-- Create the `Lets-Decode-AI/maintainers` team (referenced by `.github/CODEOWNERS`) and enable Discussions and private vulnerability reporting.
+- Enable Discussions and private vulnerability reporting.
 - Optionally add a conduct email address to `CODE_OF_CONDUCT.md`. For now, reports go through GitHub Security Advisories or the maintainers in `CODEOWNERS`.
 - Run through `docs/E2E-CHECKLIST.md` on a release build.

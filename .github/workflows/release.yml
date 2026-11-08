@@ -65,6 +65,9 @@ jobs:
     name: Release (${{ matrix.name }})
     needs: lint-test
     runs-on: ${{ matrix.os }}
+    # The updater signing key lives in this environment, which only runs for v* tags. Creating
+    # those tags is limited to the maintainers by the "Release tags" ruleset.
+    environment: release
     strategy:
       fail-fast: false
       matrix:
