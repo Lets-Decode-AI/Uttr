@@ -32,6 +32,20 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # The speech engine (sherpa-onnx) and Tauri's bundling tools (NSIS, linuxdeploy) are downloaded
+      # from GitHub Releases on every build; cache them so a GitHub download outage does not fail CI.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/sherpa-rs
+            ~/Library/Caches/sherpa-rs
+            ~/AppData/Local/sherpa-rs
+            ~/.cache/tauri
+            ~/Library/Caches/tauri
+            ~/AppData/Local/tauri
+          key: build-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: build-tools-${{ runner.os }}-${{ runner.arch }}-
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -65,6 +79,9 @@ jobs:
     name: Release (${{ matrix.name }})
     needs: lint-test
     runs-on: ${{ matrix.os }}
+    # The updater signing key lives in this environment, which only runs for v* tags. Creating
+    # those tags is limited to the maintainers by the "Release tags" ruleset.
+    environment: release
     strategy:
       fail-fast: false
       matrix:
@@ -117,6 +134,20 @@ jobs:
         with:
           workspaces: src-tauri
           key: ${{ matrix.target }}
+
+      # The speech engine (sherpa-onnx) and Tauri's bundling tools (NSIS, linuxdeploy) are downloaded
+      # from GitHub Releases on every build; cache them so a GitHub download outage does not fail CI.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/sherpa-rs
+            ~/Library/Caches/sherpa-rs
+            ~/AppData/Local/sherpa-rs
+            ~/.cache/tauri
+            ~/Library/Caches/tauri
+            ~/AppData/Local/tauri
+          key: build-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: build-tools-${{ runner.os }}-${{ runner.arch }}-
 
       - uses: actions/setup-node@v7
         with:

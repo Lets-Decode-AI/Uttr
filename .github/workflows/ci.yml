@@ -35,6 +35,20 @@ jobs:
         with:
           workspaces: src-tauri
 
+      # The speech engine (sherpa-onnx) and Tauri's bundling tools (NSIS, linuxdeploy) are downloaded
+      # from GitHub Releases on every build; cache them so a GitHub download outage does not fail CI.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/sherpa-rs
+            ~/Library/Caches/sherpa-rs
+            ~/AppData/Local/sherpa-rs
+            ~/.cache/tauri
+            ~/Library/Caches/tauri
+            ~/AppData/Local/tauri
+          key: build-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: build-tools-${{ runner.os }}-${{ runner.arch }}-
+
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -116,6 +130,20 @@ jobs:
         with:
           workspaces: src-tauri
           key: ${{ matrix.target }}
+
+      # The speech engine (sherpa-onnx) and Tauri's bundling tools (NSIS, linuxdeploy) are downloaded
+      # from GitHub Releases on every build; cache them so a GitHub download outage does not fail CI.
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/sherpa-rs
+            ~/Library/Caches/sherpa-rs
+            ~/AppData/Local/sherpa-rs
+            ~/.cache/tauri
+            ~/Library/Caches/tauri
+            ~/AppData/Local/tauri
+          key: build-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: build-tools-${{ runner.os }}-${{ runner.arch }}-
 
       - uses: actions/setup-node@v7
         with:
